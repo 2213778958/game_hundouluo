@@ -1,0 +1,15 @@
+build/
+*.o
+*.elf
+.env
+node_modules/
+__pycache__/
+docs/agents/PROCESS.md
+docs/agents/HANDOFF.md
+.godot/
+*.exe
+export/
+exports/
+*.pyc
+.venv/
+dist/

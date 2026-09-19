@@ -9,6 +9,7 @@ func run() -> PackedStringArray:
 	_flat_training_is_open_ground(failures)
 	_cover_stage_has_platforms_and_denser_fire(failures)
 	_boss_stage_is_short_corridor(failures)
+	_hostiles_have_visible_pixel_bodies(failures)
 	_not_a_level_editor(failures)
 	_pixel_look_is_neon_scifi(failures)
 	_install_registers_builders(failures)
@@ -74,6 +75,8 @@ func _flat_training_is_open_ground(failures: PackedStringArray) -> void:
 	_check(failures, _count_part(stage, "corridor") == 0, "平地练手 is not a corridor")
 	_check(failures, _count_part(stage, "boss") == 0, "平地练手 has no 头目")
 	_check(failures, _count_part(stage, "grunt") >= 1, "平地练手 has 杂兵")
+	var first_grunt := _find_part(stage, "grunt")
+	_assert_visible_pixel_body(failures, first_grunt, "平地练手 杂兵")
 	_check(failures, _count_part(stage, "spawn") == 1, "平地练手 has a player spawn")
 	_check(failures, StagesScript.has_platforms(1) == false, "layout: 平地练手 has no platforms")
 	_check(failures, StagesScript.has_cover(1) == false, "layout: 平地练手 has no cover")
@@ -128,6 +131,7 @@ func _boss_stage_is_short_corridor(failures: PackedStringArray) -> void:
 	)
 	var boss := _find_part(stage, "boss")
 	_check(failures, boss != null, "头目 node must be placed")
+	_assert_visible_pixel_body(failures, boss, "短通道头目")
 	if boss != null:
 		var spawn := _find_part(stage, "spawn")
 		if spawn != null:
@@ -142,6 +146,36 @@ func _boss_stage_is_short_corridor(failures: PackedStringArray) -> void:
 			_check(failures, probe.cleared == 1, "打倒通道头目 must 通关")
 			_check(failures, probe.stage == 3, "通关 reports stage 3, got %s" % probe.stage)
 	stage.free()
+
+
+func _hostiles_have_visible_pixel_bodies(failures: PackedStringArray) -> void:
+	for index in range(1, 4):
+		var stage: Node2D = StagesScript.build_stage(index)
+		_check(failures, stage != null, "visibility check needs stage %s" % index)
+		if stage == null:
+			continue
+		var grunts := _find_parts(stage, "grunt")
+		var bosses := _find_parts(stage, "boss")
+		if index == 1:
+			_check(failures, grunts.size() >= 1, "平地练手 visibility requires at least one 杂兵 node")
+			_check(failures, bosses.is_empty(), "平地练手 visibility must not count a 头目")
+		if index == 3:
+			_check(failures, bosses.size() == 1, "短通道头目 visibility requires a 头目 node")
+		_check(
+			failures,
+			grunts.size() == _count_part(stage, "grunt"),
+			"stage %s grunt visibility walk must match stage_part count" % index
+		)
+		for grunt in grunts:
+			_assert_visible_pixel_body(failures, grunt, "stage %s 杂兵 %s" % [index, grunt.name])
+			_check(
+				failures,
+				grunt.position.y < 300.0,
+				"stage %s 杂兵 %s must stand on the 平地, not inside the floor" % [index, grunt.name]
+			)
+		for unit in bosses:
+			_assert_visible_pixel_body(failures, unit, "stage %s 头目" % index)
+		stage.free()
 
 
 func _not_a_level_editor(failures: PackedStringArray) -> void:
@@ -263,6 +297,68 @@ func _find_part(node: Node, part: String) -> Node:
 		if found != null:
 			return found
 	return null
+
+
+func _find_parts(node: Node, part: String) -> Array[Node]:
+	var found: Array[Node] = []
+	if str(node.get_meta("stage_part", "")) == part:
+		found.append(node)
+	for child in node.get_children():
+		found.append_array(_find_parts(child, part))
+	return found
+
+
+func _assert_visible_pixel_body(failures: PackedStringArray, node: Node, label: String) -> void:
+	_check(failures, node != null, "%s node must exist" % label)
+	if node == null:
+		return
+	_check(failures, not (node is Marker2D), "%s must not be an invisible Marker2D" % label)
+	_check(failures, node is CanvasItem, "%s must be a CanvasItem" % label)
+	var sprite := _find_visible_pixel_sprite(node)
+	_check(failures, sprite != null, "%s needs a visible pixel Sprite2D body" % label)
+	if sprite == null:
+		return
+	_check(failures, sprite.visible, "%s sprite must be visible" % label)
+	_check(failures, sprite.modulate.a >= 0.5, "%s sprite modulate must stay opaque" % label)
+	_check(
+		failures,
+		sprite.texture_filter == CanvasItem.TEXTURE_FILTER_NEAREST,
+		"%s sprite must be nearest-neighbor pixels" % label
+	)
+	_check(failures, sprite.texture != null, "%s sprite needs a texture" % label)
+	if sprite.texture == null:
+		return
+	var image: Image = sprite.texture.get_image()
+	_check(failures, image != null, "%s texture must decode" % label)
+	if image == null:
+		return
+	_check(failures, image.get_width() >= 8 and image.get_height() >= 8, "%s pixel body must be large enough to see" % label)
+	var opaque := _opaque_pixel_count(image)
+	_check(failures, opaque >= 16, "%s must paint a visible pixel body, got %s opaque pixels" % [label, opaque])
+	_check(failures, _has_neon_pixel(image), "%s pixels must include neon sci-fi color" % label)
+
+
+func _find_visible_pixel_sprite(node: Node) -> Sprite2D:
+	if node is Sprite2D:
+		var sprite := node as Sprite2D
+		if sprite.visible and sprite.modulate.a >= 0.5 and sprite.texture != null:
+			var image: Image = sprite.texture.get_image()
+			if image != null and _opaque_pixel_count(image) >= 16:
+				return sprite
+	for child in node.get_children():
+		var found := _find_visible_pixel_sprite(child)
+		if found != null:
+			return found
+	return null
+
+
+func _opaque_pixel_count(image: Image) -> int:
+	var total := 0
+	for y in image.get_height():
+		for x in image.get_width():
+			if image.get_pixel(x, y).a >= 0.5:
+				total += 1
+	return total
 
 
 func _find_sprite(node: Node) -> Sprite2D:

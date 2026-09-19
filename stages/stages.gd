@@ -300,22 +300,138 @@ static func _add_solid(
 
 
 static func _make_hostile(kind: String, pos: Vector2, min_x: float, max_x: float) -> Node2D:
-	if ResourceLoader.exists(HOSTILES_PATH):
-		var script: Script = load(HOSTILES_PATH)
-		if script != null and script.can_instantiate():
-			var unit: Node = script.new()
-			if kind == "boss" and unit.has_method("configure_boss"):
-				unit.call("configure_boss", pos)
-			elif unit.has_method("configure_grunt"):
-				unit.call("configure_grunt", pos, min_x, max_x)
-			else:
-				unit.position = pos
-			unit.set_meta("stage_part", kind)
-			return unit
-	var slot := Marker2D.new()
-	slot.position = pos
-	slot.set_meta("stage_part", kind)
-	return slot
+	var unit: Node2D = _try_hostiles_unit(kind, pos, min_x, max_x)
+	if unit == null:
+		unit = _stand_in_hostile(kind, pos)
+	unit.set_meta("stage_part", kind)
+	if not _has_visible_pixel_body(unit):
+		_attach_pixel_body(unit, kind)
+	return unit
+
+
+static func _try_hostiles_unit(kind: String, pos: Vector2, min_x: float, max_x: float) -> Node2D:
+	if not ResourceLoader.exists(HOSTILES_PATH):
+		return null
+	var script: Script = load(HOSTILES_PATH)
+	if script == null or not script.can_instantiate():
+		return null
+	var inst: Node = script.new()
+	if inst == null or not (inst is Node2D):
+		if inst != null and inst is Node:
+			inst.free()
+		return null
+	var unit := inst as Node2D
+	if kind == "boss" and unit.has_method("configure_boss"):
+		unit.call("configure_boss", pos)
+	elif unit.has_method("configure_grunt"):
+		unit.call("configure_grunt", pos, min_x, max_x)
+	else:
+		unit.position = pos
+	return unit
+
+
+static func _stand_in_hostile(kind: String, pos: Vector2) -> Sprite2D:
+	var body := Sprite2D.new()
+	body.position = pos
+	body.centered = true
+	body.z_index = 1
+	body.visible = true
+	body.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	body.texture = _boss_pixel_texture() if kind == "boss" else _grunt_pixel_texture()
+	return body
+
+
+static func _attach_pixel_body(unit: Node2D, kind: String) -> void:
+	var sprite := Sprite2D.new()
+	sprite.name = "PixelBody"
+	sprite.centered = true
+	sprite.z_index = 1
+	sprite.visible = true
+	sprite.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	sprite.texture = _boss_pixel_texture() if kind == "boss" else _grunt_pixel_texture()
+	unit.add_child(sprite)
+
+
+static func _has_visible_pixel_body(node: Node) -> bool:
+	if node is CanvasItem and not (node as CanvasItem).visible:
+		return false
+	if node is Sprite2D:
+		var sprite := node as Sprite2D
+		if sprite.modulate.a >= 0.5 and sprite.self_modulate.a >= 0.5 and sprite.texture != null:
+			var image: Image = sprite.texture.get_image()
+			if image != null and _opaque_pixel_count(image) >= 16:
+				return true
+	for child in node.get_children():
+		if _has_visible_pixel_body(child):
+			return true
+	return false
+
+
+static func _opaque_pixel_count(image: Image) -> int:
+	var total := 0
+	for y in image.get_height():
+		for x in image.get_width():
+			if image.get_pixel(x, y).a >= 0.5:
+				total += 1
+	return total
+
+
+static func _grunt_pixel_texture() -> ImageTexture:
+	const WIDTH := 16
+	const HEIGHT := 20
+	var image := Image.create(WIDTH, HEIGHT, false, Image.FORMAT_RGBA8)
+	var hull := Color(0.06, 0.18, 0.34)
+	var rim := Color(0.15, 0.98, 1.0)
+	var visor := Color(1.0, 0.28, 0.88)
+	var core := Color(0.25, 1.0, 0.62)
+	for y in range(5, 16):
+		for x in range(3, 13):
+			image.set_pixel(x, y, hull)
+	for y in range(6, 15):
+		image.set_pixel(3, y, rim)
+		image.set_pixel(12, y, rim)
+	for x in range(4, 12):
+		image.set_pixel(x, 5, rim)
+	for y in range(2, 6):
+		for x in range(5, 11):
+			image.set_pixel(x, y, visor)
+	image.set_pixel(4, 3, visor)
+	image.set_pixel(11, 3, visor)
+	for y in range(16, 20):
+		for x in range(6, 10):
+			image.set_pixel(x, y, core)
+	image.set_pixel(5, 17, core)
+	image.set_pixel(10, 17, core)
+	return ImageTexture.create_from_image(image)
+
+
+static func _boss_pixel_texture() -> ImageTexture:
+	const WIDTH := 24
+	const HEIGHT := 32
+	var image := Image.create(WIDTH, HEIGHT, false, Image.FORMAT_RGBA8)
+	var hull := Color(0.14, 0.08, 0.30)
+	var rim := Color(0.62, 0.22, 1.0)
+	var visor := Color(1.0, 0.24, 0.86)
+	var core := Color(0.18, 1.0, 0.90)
+	for y in range(7, 29):
+		for x in range(3, 21):
+			image.set_pixel(x, y, hull)
+	for y in range(8, 28):
+		image.set_pixel(3, y, rim)
+		image.set_pixel(20, y, rim)
+	for x in range(4, 20):
+		image.set_pixel(x, 7, rim)
+	for y in range(2, 8):
+		for x in range(7, 17):
+			image.set_pixel(x, y, visor)
+	for y in range(13, 19):
+		for x in range(9, 15):
+			image.set_pixel(x, y, core)
+	image.set_pixel(11, 0, rim)
+	image.set_pixel(12, 0, rim)
+	image.set_pixel(11, 1, visor)
+	image.set_pixel(12, 1, visor)
+	return ImageTexture.create_from_image(image)
 
 
 static func _slab_texture(fill: Color, edge: Color, width: int, height: int) -> ImageTexture:

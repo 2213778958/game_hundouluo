@@ -35,8 +35,10 @@ const BOSS_MUZZLE := Color(1.0, 0.22, 0.9)
 const BOSS_SHOT_TINT := Color(1.0, 0.35, 1.0)
 ## 打倒后侧躺，避免仍像站着的活人。
 const DEATH_FALL_RADIANS := PI * 0.5
-## 尸体变暗，和活着的霓虹外壳分开。
-const DEATH_MODULATE := Color(0.55, 0.62, 0.72)
+## 尸体变暗，熄掉活着时的霓虹外壳。
+const DEATH_MODULATE := Color(0.42, 0.48, 0.58)
+## 残骸往地板落一点，避免旋转后仍悬浮成站姿。
+const DEATH_DROP := Vector2(0.0, 6.0)
 
 ## 当前身份：杂兵或头目。
 var role: Role = Role.GRUNT
@@ -52,6 +54,7 @@ var patrol_min_x: float = -100000.0
 var patrol_max_x: float = 100000.0
 
 var _last_fire_sec: float = -1000.0
+var _overlay_textures: Dictionary = {}
 
 ## 杂兵或头目被打倒。
 signal defeated
@@ -182,6 +185,23 @@ func take_damage(amount: int) -> void:
 		stage_cleared.emit(STAGE_BOSS)
 
 
+## 被打倒后是否已经换成死亡残骸外形。活着或只受伤时为 false。
+func shows_dead() -> bool:
+	if alive:
+		return false
+	var sprites := _iter_sprites()
+	if sprites.is_empty():
+		return false
+	for sprite in sprites:
+		if not sprite.visible or sprite.texture == null:
+			return false
+		if not is_equal_approx(absf(sprite.rotation), DEATH_FALL_RADIANS):
+			return false
+		if sprite.modulate.v >= 0.85:
+			return false
+	return true
+
+
 func _physics_process(delta: float) -> void:
 	if role == Role.GRUNT and alive:
 		_update_patrol_velocity()
@@ -236,33 +256,56 @@ func _set_texture(texture: Texture2D) -> void:
 
 
 func _face_sprite() -> void:
-	var sprite := get_node_or_null("Sprite2D") as Sprite2D
-	if sprite == null:
+	if not alive:
 		return
-	sprite.flip_h = facing.x > 0.0
+	for sprite in _iter_sprites():
+		sprite.flip_h = facing.x > 0.0
+
+
+func _iter_sprites() -> Array[Sprite2D]:
+	var sprites: Array[Sprite2D] = []
+	_collect_sprites(self, sprites)
+	return sprites
+
+
+func _collect_sprites(node: Node, sprites: Array[Sprite2D]) -> void:
+	if node is Sprite2D:
+		sprites.append(node as Sprite2D)
+	for child in node.get_children():
+		_collect_sprites(child, sprites)
 
 
 func _apply_alive_look() -> void:
 	collision_layer = BODY_LAYER
-	var sprite := get_node_or_null("Sprite2D") as Sprite2D
-	if sprite == null:
-		return
-	sprite.rotation = 0.0
-	sprite.modulate = Color.WHITE
-	sprite.visible = true
+	for sprite in _iter_sprites():
+		sprite.rotation = 0.0
+		sprite.modulate = Color.WHITE
+		sprite.visible = true
+		sprite.offset = Vector2.ZERO
+		sprite.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+		var id := sprite.get_instance_id()
+		if sprite.name == "Sprite2D":
+			sprite.texture = _boss_texture() if role == Role.BOSS else _drone_texture()
+		elif _overlay_textures.has(id):
+			sprite.texture = _overlay_textures[id]
+	_overlay_textures.clear()
 	_face_sprite()
 
 
 func _apply_dead_look() -> void:
 	collision_layer = 0
-	var sprite := get_node_or_null("Sprite2D") as Sprite2D
-	if sprite == null:
-		return
-	sprite.rotation = DEATH_FALL_RADIANS
-	sprite.modulate = DEATH_MODULATE
-	sprite.visible = true
-	sprite.texture = _wrecked_boss_texture() if role == Role.BOSS else _wrecked_drone_texture()
-	sprite.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	var wreck := _wrecked_boss_texture() if role == Role.BOSS else _wrecked_drone_texture()
+	for sprite in _iter_sprites():
+		var id := sprite.get_instance_id()
+		if not _overlay_textures.has(id):
+			_overlay_textures[id] = sprite.texture
+		sprite.rotation = DEATH_FALL_RADIANS
+		sprite.modulate = DEATH_MODULATE
+		sprite.visible = true
+		sprite.offset = DEATH_DROP
+		sprite.flip_h = false
+		sprite.texture = wreck
+		sprite.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 
 
 func _drone_texture() -> ImageTexture:
@@ -319,17 +362,21 @@ func _wrecked_drone_texture() -> ImageTexture:
 	const WIDTH := 16
 	const HEIGHT := 20
 	var image := Image.create(WIDTH, HEIGHT, false, Image.FORMAT_RGBA8)
-	var hull := Color(0.05, 0.1, 0.16)
+	var hull := Color(0.16, 0.2, 0.28)
 	var crack := Color(0.2, 0.95, 1.0)
 	var spark := Color(1.0, 0.45, 0.15)
-	for y in range(8, 16):
+	for y in range(7, 18):
 		for x in range(2, 14):
+			if (x + y) % 5 == 0:
+				continue
 			image.set_pixel(x, y, hull)
-	for x in range(4, 12):
-		image.set_pixel(x, 11, crack)
-	image.set_pixel(5, 9, spark)
-	image.set_pixel(10, 13, spark)
-	image.set_pixel(7, 15, crack)
+	for i in range(3, 13):
+		image.set_pixel(i, i + 2, crack)
+		image.set_pixel(15 - i, i + 2, crack)
+	image.set_pixel(4, 8, spark)
+	image.set_pixel(11, 10, spark)
+	image.set_pixel(7, 16, crack)
+	image.set_pixel(8, 16, crack)
 	return ImageTexture.create_from_image(image)
 
 
@@ -337,17 +384,22 @@ func _wrecked_boss_texture() -> ImageTexture:
 	const WIDTH := 24
 	const HEIGHT := 32
 	var image := Image.create(WIDTH, HEIGHT, false, Image.FORMAT_RGBA8)
-	var hull := Color(0.08, 0.06, 0.14)
-	var crack := Color(0.7, 0.25, 1.0)
+	var hull := Color(0.2, 0.14, 0.28)
+	var crack := Color(0.85, 0.28, 1.0)
 	var spark := Color(0.25, 1.0, 0.8)
-	for y in range(12, 28):
+	for y in range(10, 30):
 		for x in range(2, 22):
+			if (x + y) % 6 == 0:
+				continue
 			image.set_pixel(x, y, hull)
-	for x in range(5, 19):
-		image.set_pixel(x, 18, crack)
-	image.set_pixel(8, 15, spark)
-	image.set_pixel(15, 22, spark)
-	image.set_pixel(12, 24, crack)
+	for i in range(4, 20):
+		image.set_pixel(i, i + 4, crack)
+		image.set_pixel(23 - i, i + 4, crack)
+	image.set_pixel(6, 14, spark)
+	image.set_pixel(17, 18, spark)
+	image.set_pixel(11, 27, crack)
+	image.set_pixel(12, 27, crack)
+	image.set_pixel(13, 27, crack)
 	return ImageTexture.create_from_image(image)
 
 

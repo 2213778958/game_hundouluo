@@ -161,6 +161,8 @@ func _defeating_grunt_is_not_clear(failures: PackedStringArray) -> void:
 func _defeated_hostiles_look_dead(failures: PackedStringArray) -> void:
 	_assert_lethal_hits_show_death(_make_grunt(Vector2(80, 120)), "杂兵", failures)
 	_assert_lethal_hits_show_death(_make_boss(Vector2(520, 120)), "头目", failures)
+	_assert_overlay_sprite_also_dies(_make_grunt(Vector2(80, 120)), "杂兵", failures)
+	_assert_overlay_sprite_also_dies(_make_boss(Vector2(520, 120)), "头目", failures)
 
 
 func _assert_lethal_hits_show_death(
@@ -179,8 +181,12 @@ func _assert_lethal_hits_show_death(
 		"活着的%s occupies BODY_LAYER" % label
 	)
 	_check(failures, sprite.modulate.v >= 0.95, "活着的%s is fully lit" % label)
+	_check(failures, unit.call("shows_dead") == false, "活着的%s does not show a corpse" % label)
+	if living_image != null:
+		_check(failures, _has_head_visor(living_image), "活着的%s has a lit visor" % label)
 	unit.call("take_damage", 1)
 	_check(failures, unit.get("alive") == true, "one hit does not kill %s" % label)
+	_check(failures, unit.call("shows_dead") == false, "wounded %s still looks alive" % label)
 	_check(failures, is_zero_approx(sprite.rotation), "wounded %s still stands" % label)
 	_check(
 		failures,
@@ -194,6 +200,7 @@ func _assert_lethal_hits_show_death(
 	)
 	unit.call("take_damage", int(unit.get("hp")))
 	_check(failures, unit.get("alive") == false, "lethal hits defeat %s" % label)
+	_check(failures, unit.call("shows_dead") == true, "defeated %s must show a corpse" % label)
 	_check(
 		failures,
 		is_equal_approx(absf(sprite.rotation), PI * 0.5),
@@ -201,6 +208,7 @@ func _assert_lethal_hits_show_death(
 	)
 	_check(failures, sprite.visible, "defeated %s stays on screen as a corpse" % label)
 	_check(failures, sprite.texture != null, "defeated %s still has pixels" % label)
+	_check(failures, sprite.offset.y > 0.0, "defeated %s drops to the floor" % label)
 	var dead_image: Image = sprite.texture.get_image() if sprite.texture != null else null
 	_check(
 		failures,
@@ -209,10 +217,16 @@ func _assert_lethal_hits_show_death(
 	)
 	if dead_image != null:
 		_check(failures, _has_neon_pixel(dead_image), "defeated %s wreck stays neon sci-fi" % label)
+		_check(
+			failures,
+			not _has_head_visor(dead_image),
+			"defeated %s visor is out; must not look like a standing live unit" % label
+		)
 	_check(failures, unit.collision_layer == 0, "defeated %s is no longer a living body" % label)
 	_check(failures, sprite.modulate.v < 0.85, "defeated %s is dimmed" % label)
 	unit.call("apply_walk", 1.0)
 	unit.call("face_toward", Vector2(unit.position.x + 80.0, unit.position.y))
+	_check(failures, unit.call("shows_dead") == true, "dead %s stays a corpse after walk/face" % label)
 	_check(
 		failures,
 		is_equal_approx(absf(sprite.rotation), PI * 0.5),
@@ -224,12 +238,43 @@ func _assert_lethal_hits_show_death(
 	else:
 		unit.call("configure_boss", unit.position)
 	_check(failures, unit.get("alive") == true, "reconfigured %s is alive" % label)
+	_check(failures, unit.call("shows_dead") == false, "reconfigured %s is not a corpse" % label)
 	_check(failures, is_zero_approx(sprite.rotation), "reconfigured %s stands again" % label)
+	_check(failures, is_zero_approx(sprite.offset.y), "reconfigured %s no longer lies on the floor" % label)
 	_check(
 		failures,
 		unit.collision_layer == HostileScript.BODY_LAYER,
 		"reconfigured %s occupies BODY_LAYER" % label
 	)
+	unit.free()
+
+
+func _assert_overlay_sprite_also_dies(
+	unit: CharacterBody2D, label: String, failures: PackedStringArray
+) -> void:
+	var overlay := Sprite2D.new()
+	overlay.name = "PixelBody"
+	overlay.visible = true
+	overlay.modulate = Color.WHITE
+	overlay.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	var own := _find_sprite(unit)
+	if own != null and own.texture != null:
+		overlay.texture = own.texture
+	unit.add_child(overlay)
+	unit.call("take_damage", int(unit.get("hp")))
+	_check(failures, unit.call("shows_dead") == true, "overlay %s still reports a corpse" % label)
+	_check(
+		failures,
+		is_equal_approx(absf(overlay.rotation), PI * 0.5),
+		"overlay on defeated %s must fall, not stay a standing live body" % label
+	)
+	_check(failures, overlay.modulate.v < 0.85, "overlay on defeated %s is dimmed" % label)
+	if overlay.texture != null and own != null and own.texture != null:
+		_check(
+			failures,
+			_same_pixels(overlay.texture.get_image(), own.texture.get_image()),
+			"overlay on defeated %s must use the wreck, not a living stand-in" % label
+		)
 	unit.free()
 
 
@@ -383,6 +428,18 @@ func _is_neon(color: Color) -> bool:
 
 func _has_neon_pixel(image: Image) -> bool:
 	for y in image.get_height():
+		for x in image.get_width():
+			var color := image.get_pixel(x, y)
+			if color.a < 0.5:
+				continue
+			if color.s >= 0.45 and color.v >= 0.7:
+				return true
+	return false
+
+
+func _has_head_visor(image: Image) -> bool:
+	var top := maxi(1, int(image.get_height() / 4))
+	for y in range(0, top):
 		for x in image.get_width():
 			var color := image.get_pixel(x, y)
 			if color.a < 0.5:

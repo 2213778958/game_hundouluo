@@ -14,6 +14,8 @@ func run() -> PackedStringArray:
 	_restart_keeps_weapon(failures)
 	_hang_audio_without_audio_module(failures)
 	_nodes_stay_off_tree_and_2d(failures)
+	_boot_does_not_compile_depend_on_stages(failures)
+	_weapon_opens_visible_flat_training(failures)
 	return failures
 
 
@@ -194,15 +196,66 @@ func _nodes_stay_off_tree_and_2d(failures: PackedStringArray) -> void:
 	_walk_no_3d(boot, failures)
 	var dir := DirAccess.open("res://boot")
 	_check(failures, dir != null, "boot/ must exist")
+	var saw_main := false
 	if dir != null:
 		dir.list_dir_begin()
 		var fname := dir.get_next()
 		while fname != "":
-			_check(failures, not fname.ends_with(".tscn"), "no scene files, found %s" % fname)
-			_check(failures, not fname.ends_with(".scn"), "no packed scenes, found %s" % fname)
+			if fname == "main.tscn":
+				saw_main = true
+			elif fname.ends_with(".tscn"):
+				failures.append("only boot/main.tscn may be a packed scene, found %s" % fname)
+			_check(failures, not fname.ends_with(".scn"), "no packed .scn, found %s" % fname)
 			fname = dir.get_next()
 		dir.list_dir_end()
+	_check(failures, saw_main, "boot/main.tscn must exist so godot --path . has a main scene")
 	boot.free()
+
+
+func _boot_does_not_compile_depend_on_stages(failures: PackedStringArray) -> void:
+	var src := FileAccess.get_file_as_string("res://boot/boot.gd")
+	_check(failures, src != "", "boot.gd must be readable")
+	_check(failures, not src.contains("preload(\"res://stages"), "boot.gd must not preload stages")
+	_check(failures, not src.contains("preload('res://stages"), "boot.gd must not preload stages")
+	_check(failures, not src.contains("class_name Stages"), "boot.gd must not alias stages")
+	_check(
+		failures,
+		"ResourceLoader.exists" in src and "STAGES_PATH" in src,
+		"boot must hang stages at runtime via STAGES_PATH"
+	)
+	_check(failures, "func hang_stages" in src, "boot must expose hang_stages for the autoload path")
+
+
+func _weapon_opens_visible_flat_training(failures: PackedStringArray) -> void:
+	if not ResourceLoader.exists("res://stages/stages.gd"):
+		failures.append("stages catalog missing; cannot hang 平地练手")
+		return
+	for pair in [
+		["步枪", BootScript.WEAPON_RIFLE],
+		["散弹枪", BootScript.WEAPON_SHOTGUN],
+		["激光枪", BootScript.WEAPON_LASER],
+	]:
+		var boot := _make_boot()
+		var probe := ChoiceProbe.new()
+		boot.connect("stage_changed", Callable(probe, "on_stage"))
+		boot.call("hang_stages")
+		boot.call("choose_weapon_by_name", pair[0])
+		_check(failures, boot.get("current_stage") == 1, "choosing %s must enter 平地练手" % pair[0])
+		_check(failures, probe.stage == 1, "choosing %s must switch via boot stage_changed(1)" % pair[0])
+		var host := boot.get_node_or_null("StageHost")
+		_check(failures, host != null and host.get_child_count() > 0, "choosing %s must put a stage under StageHost" % pair[0])
+		if host == null or host.get_child_count() == 0:
+			boot.free()
+			continue
+		var stage: Node = host.get_child(0)
+		_check(failures, stage.name == "平地练手", "choosing %s must build 平地练手, got %s" % [pair[0], stage.name])
+		_check(failures, _count_stage_part(stage, "floor") >= 1, "平地练手 after %s must have ground" % pair[0])
+		_check(failures, _count_stage_part(stage, "grunt") >= 1, "平地练手 after %s must have 杂兵" % pair[0])
+		var floor_node := _find_stage_part(stage, "floor")
+		var grunt := _find_stage_part(stage, "grunt")
+		_check(failures, _has_visible_sprite(floor_node), "平地练手 ground must be a visible sprite after %s" % pair[0])
+		_check(failures, _has_visible_sprite(grunt), "平地练手 杂兵 must be a visible sprite after %s" % pair[0])
+		boot.free()
 
 
 func _walk_no_3d(node: Node, failures: PackedStringArray) -> void:
@@ -242,6 +295,38 @@ func _host_child_name(boot: Node) -> String:
 	if host == null or host.get_child_count() == 0:
 		return ""
 	return str(host.get_child(0).name)
+
+
+func _count_stage_part(node: Node, part: String) -> int:
+	var total := 0
+	if str(node.get_meta("stage_part", "")) == part:
+		total += 1
+	for child in node.get_children():
+		total += _count_stage_part(child, part)
+	return total
+
+
+func _find_stage_part(node: Node, part: String) -> Node:
+	if str(node.get_meta("stage_part", "")) == part:
+		return node
+	for child in node.get_children():
+		var found := _find_stage_part(child, part)
+		if found != null:
+			return found
+	return null
+
+
+func _has_visible_sprite(node: Node) -> bool:
+	if node == null:
+		return false
+	if node is Sprite2D:
+		var sprite := node as Sprite2D
+		if sprite.visible and sprite.texture != null and sprite.modulate.a >= 0.5:
+			return true
+	for child in node.get_children():
+		if _has_visible_sprite(child):
+			return true
+	return false
 
 
 class ChoiceProbe:

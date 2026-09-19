@@ -5,6 +5,7 @@ config_version=5
 
 config/name="突击三关"
 config/features=PackedStringArray("4.7")
+run/main_scene="res://boot/main.tscn"
 
 [autoload]
 

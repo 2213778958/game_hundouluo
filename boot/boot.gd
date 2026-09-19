@@ -1,6 +1,6 @@
 extends CanvasLayer
 
-## 入口、武器选择、血条与三关切换。stages 走本 autoload，不打包场景。
+## 入口、武器选择、血条与三关切换。主场景开打；切关走本 autoload。不编译依赖 stages。
 
 const HpBarScript := preload("res://boot/hp_bar.gd")
 
@@ -16,6 +16,7 @@ const STAGE_COUNT := 3
 
 const AUDIO_PATH := "res://audio/audio.gd"
 const PLAYER_PATH := "res://player/player.gd"
+const STAGES_PATH := "res://stages/stages.gd"
 const TITLE := "突击三关"
 const NEON := Color(0.12, 0.95, 1.0)
 const MAGENTA := Color(1.0, 0.22, 0.86)
@@ -53,6 +54,10 @@ func _init() -> void:
 	_hp_bar.visible = false
 	add_child(_hp_bar)
 	_build_entry()
+
+
+func _ready() -> void:
+	hang_stages()
 
 
 ## 开打前可选的三套武器名。
@@ -176,6 +181,19 @@ func get_hp_bar() -> Control:
 ## 入口选择是否还在前台。
 func is_entry_visible() -> bool:
 	return _entry.visible
+
+
+## 运行时挂上 stages 并 register_stage。不 preload stages；catalog 为空则按路径 load。
+func hang_stages(catalog: Node = null) -> void:
+	var node := catalog
+	if node == null:
+		node = _try_make_stages()
+	if node == null:
+		return
+	if node.has_method("install"):
+		node.call("install", self)
+	if catalog == null and node.get_parent() == null:
+		node.free()
 
 
 ## Hang GameAudio 进树，BGM/短音才能出声。audio 模块不在本票树里时由调用方传入桩。
@@ -310,13 +328,33 @@ func _sync_player() -> void:
 	if _player == null:
 		return
 	if _player.has_method("configure") and current_stage >= 1:
-		var spawn := Vector2(48, 120)
-		if _player.get("spawn_position") is Vector2:
-			var marked: Vector2 = _player.get("spawn_position")
-			if marked != Vector2.ZERO:
-				spawn = marked
-		_player.call("configure", selected_weapon, spawn, current_stage)
+		_player.call("configure", selected_weapon, _read_stage_spawn(), current_stage)
 	bind_hp_bar(_player)
+
+
+func _read_stage_spawn() -> Vector2:
+	for child in _stage_host.get_children():
+		if child.has_meta("player_spawn"):
+			var marked: Variant = child.get_meta("player_spawn")
+			if marked is Vector2 and marked != Vector2.ZERO:
+				return marked
+		var marker := child.get_node_or_null("PlayerSpawn")
+		if marker is Node2D:
+			return (marker as Node2D).position
+	if _player != null and is_instance_valid(_player) and _player.get("spawn_position") is Vector2:
+		var marked: Vector2 = _player.get("spawn_position")
+		if marked != Vector2.ZERO:
+			return marked
+	return Vector2(48, 120)
+
+
+func _try_make_stages() -> Node:
+	if not ResourceLoader.exists(STAGES_PATH):
+		return null
+	var script: Script = load(STAGES_PATH)
+	if script == null or not script.can_instantiate():
+		return null
+	return script.new()
 
 
 func _try_make_player() -> Node:

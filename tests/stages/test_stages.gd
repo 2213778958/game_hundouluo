@@ -239,8 +239,9 @@ func _solids_are_visible_pixels(failures: PackedStringArray) -> void:
 			_assert_visible_solid(failures, platform, "高台 %s" % platform.name, 80, 8)
 		var covers := _find_parts(cover, "cover")
 		_check(failures, covers.size() >= 2, "高台掩体 visible solids need 掩体")
+		var min_cover_h := StagesScript.max_rise()
 		for box in covers:
-			_assert_visible_solid(failures, box, "掩体 %s" % box.name, 16, 48)
+			_assert_visible_solid(failures, box, "掩体 %s" % box.name, 16, min_cover_h)
 		cover.free()
 	var corridor: Node2D = StagesScript.build_stage(3)
 	_check(failures, corridor != null, "visible solids need 短通道头目")

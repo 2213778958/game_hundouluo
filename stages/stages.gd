@@ -13,6 +13,7 @@ const STAGE_BOSS := 3
 const STAGE_COUNT := 3
 
 const HOSTILES_PATH := "res://hostiles/hostiles.gd"
+const PLAYER_PATH := "res://player/player.gd"
 const FLOOR_TOP := 300.0
 const FLOOR_THICKNESS := 48.0
 const VIEW_WIDTH := 640.0
@@ -21,6 +22,7 @@ const BOUND_THICKNESS := 16.0
 const WORLD_LAYER := 1
 const GRUNT_SPRITE_H := 40
 const BOSS_SPRITE_H := 64
+const RUNNER_PATROL_HALF := 60.0
 const VOID := Color(0.03, 0.04, 0.09)
 const NEON := Color(0.12, 0.95, 1.0)
 const MAGENTA := Color(1.0, 0.22, 0.86)
@@ -74,6 +76,71 @@ static func grunt_count(stage_index: int) -> int:
 		return 0
 	var slots: Array = _layout(stage_index)["grunts"]
 	return slots.size()
+
+
+## 该关布局槽位数：杂兵条数加头目。小于 1 视为布置失败。
+static func layout_slots(stage_index: int) -> int:
+	if stage_index < 1 or stage_index > STAGE_COUNT:
+		return 0
+	var slots := grunt_count(stage_index)
+	if has_boss(stage_index):
+		slots += 1
+	return slots
+
+
+## 从 player 跳跃常数算出的一跳最大升高。禁止写死与跳跃脱节的像素。
+static func max_rise() -> int:
+	var jump := absf(_player_constant("JUMP_VELOCITY", -320.0))
+	var gravity := _player_constant("GRAVITY", 900.0)
+	if gravity <= 0.0:
+		return 0
+	return int(floor(jump * jump / (2.0 * gravity))) - 8
+
+
+## 一跳允许的水平间隙，按 player 跑速。
+static func max_step_gap() -> float:
+	return _player_constant("RUN_SPEED", 140.0) * 0.35
+
+
+## 相邻布局杂兵站位的最小水平间距，按 player 跑速。
+static func min_grunt_spacing() -> float:
+	return _player_constant("RUN_SPEED", 140.0) * 1.2
+
+
+## 恰好两只杂兵时的最小水平间距，按 player 跑速。
+static func min_pair_spacing() -> float:
+	return _player_constant("RUN_SPEED", 140.0) * 1.5
+
+
+## 玩家碰撞盒高度，掩体高度下界。
+static func player_collision_height() -> float:
+	if not ResourceLoader.exists(PLAYER_PATH):
+		return 22.0
+	var script: Script = load(PLAYER_PATH)
+	if script == null or not script.can_instantiate():
+		return 22.0
+	var probe: Node = script.new()
+	var height := 22.0
+	for child in probe.get_children():
+		if child is CollisionShape2D:
+			var shape := (child as CollisionShape2D).shape
+			if shape is RectangleShape2D:
+				height = (shape as RectangleShape2D).size.y
+				break
+	probe.free()
+	return height
+
+
+## 树上仍能造成伤害的杂兵/头目数。
+static func living_hostile_count(stage: Node) -> int:
+	return _living_hostile_count(stage)
+
+
+## go_to_stage 之后、开火之前，活敌是否等于布局槽位。
+static func ready_survival_held(stage: Node) -> bool:
+	if stage == null or not is_instance_valid(stage):
+		return false
+	return bool(stage.get_meta("ready_survival", false))
 
 
 ## 该关是否有高台。
@@ -240,17 +307,28 @@ static func build_stage(stage_index: int) -> Node2D:
 	root.add_child(spawn)
 	var grunt_i := 1
 	for slot in spec["grunts"]:
-		var pos: Vector2 = slot
-		var unit := _make_hostile("grunt", pos, pos.x - 36.0, pos.x + 36.0)
+		var grunt := _slot_as_dict(slot, "runner")
+		var pos: Vector2 = grunt["pos"]
+		var unit := _make_hostile(
+			"grunt",
+			pos,
+			float(grunt["min_x"]),
+			float(grunt["max_x"]),
+			str(grunt["duty"])
+		)
 		unit.name = "Grunt_%s" % grunt_i
 		root.add_child(unit)
 		grunt_i += 1
 	var boss_pos: Vector2 = spec["boss"]
 	if boss_pos != Vector2.ZERO:
-		var boss := _make_hostile("boss", boss_pos, boss_pos.x, boss_pos.x)
+		var boss := _make_hostile("boss", boss_pos, boss_pos.x, boss_pos.x, "boss")
 		boss.name = "Boss"
 		root.add_child(boss)
-	root.set_meta("hostile_count", _count_hostiles(root))
+	var slots := layout_slots(stage_index)
+	var living := _living_hostile_count(root)
+	root.set_meta("layout_slots", slots)
+	root.set_meta("hostile_count", living)
+	root.set_meta("ready_survival", slots >= 1 and living == slots)
 	_add_clear_watcher(root)
 	return root
 
@@ -270,14 +348,21 @@ static func next_stage(stage_index: int) -> int:
 	return stage_index + 1
 
 
-## 本关是否已清空：布置过敌人，且活着的杂兵/头目为 0。
+## 本关是否已清空：就绪存活曾成立，且每一个该打倒的布局槽位都已死。
 static func is_cleared(stage: Node) -> bool:
 	if stage == null or not is_instance_valid(stage):
 		return false
-	var expected := int(stage.get_meta("hostile_count", 0))
-	if expected <= 0:
-		expected = _count_hostiles(stage)
-	if expected <= 0:
+	if not bool(stage.get_meta("ready_survival", false)):
+		return false
+	var index := int(stage.get_meta("stage_index", 0))
+	if has_boss(index):
+		return _boss_is_dead(stage)
+	var expected := int(stage.get_meta("layout_slots", 0))
+	if expected < 1:
+		expected = layout_slots(index)
+	if expected < 1:
+		return false
+	if _count_hostiles(stage) != expected:
 		return false
 	return _living_hostile_count(stage) == 0
 
@@ -364,59 +449,134 @@ static func _living_hostile_count(node: Node) -> int:
 
 
 static func _layout(stage_index: int) -> Dictionary:
+	var rise := float(max_rise())
+	var cover_h := rise
+	var cover_top := FLOOR_TOP - cover_h
 	match stage_index:
 		STAGE_FLAT:
+			var length := 640.0
 			return {
-				"length": 640.0,
+				"length": length,
 				"corridor": false,
 				"ceiling_bottom": 0.0,
 				"platforms": [],
 				"covers": [],
 				"grunts": [
-					_stand_on(280.0, FLOOR_TOP, GRUNT_SPRITE_H),
-					_stand_on(460.0, FLOOR_TOP, GRUNT_SPRITE_H),
+					_grunt_spec("runner", 200.0, FLOOR_TOP, length),
+					_grunt_spec("runner", 380.0, FLOOR_TOP, length),
+					_grunt_spec("runner", 560.0, FLOOR_TOP, length),
 				],
 				"boss": Vector2.ZERO,
 				"spawn": _stand_on(48.0, FLOOR_TOP, GRUNT_SPRITE_H),
 			}
 		STAGE_COVER:
+			var length := 720.0
+			var p1_top := FLOOR_TOP - rise
+			var p2_top := p1_top - rise
 			return {
-				"length": 720.0,
+				"length": length,
 				"corridor": false,
 				"ceiling_bottom": 0.0,
 				"platforms": [
-					Rect2(168.0, 220.0, 96.0, 12.0),
-					Rect2(336.0, 176.0, 112.0, 12.0),
-					Rect2(520.0, 220.0, 96.0, 12.0),
+					Rect2(200.0, p1_top, 96.0, 12.0),
+					Rect2(280.0, p2_top, 112.0, 12.0),
 				],
 				"covers": [
-					Rect2(240.0, 236.0, 24.0, 64.0),
-					Rect2(392.0, 236.0, 24.0, 64.0),
-					Rect2(560.0, 236.0, 24.0, 64.0),
+					Rect2(88.0, cover_top, 24.0, cover_h),
+					Rect2(600.0, cover_top, 24.0, cover_h),
 				],
 				"grunts": [
-					_stand_on(220.0, FLOOR_TOP, GRUNT_SPRITE_H),
-					_stand_on(380.0, FLOOR_TOP, GRUNT_SPRITE_H),
-					_stand_on(620.0, FLOOR_TOP, GRUNT_SPRITE_H),
-					_stand_on(216.0, 220.0, GRUNT_SPRITE_H),
-					_stand_on(392.0, 176.0, GRUNT_SPRITE_H),
+					_grunt_spec("runner", 140.0, FLOOR_TOP, length),
+					_grunt_spec("runner", 520.0, FLOOR_TOP, length),
+					_grunt_spec("sentry", 248.0, p1_top, length),
+					_grunt_spec("sentry", 336.0, p2_top, length),
 				],
 				"boss": Vector2.ZERO,
 				"spawn": _stand_on(48.0, FLOOR_TOP, GRUNT_SPRITE_H),
 			}
 		STAGE_BOSS:
+			var length := 420.0
 			return {
-				"length": 420.0,
+				"length": length,
 				"corridor": true,
 				"ceiling_bottom": 200.0,
 				"platforms": [],
 				"covers": [],
-				"grunts": [],
+				"grunts": [
+					_grunt_spec("sentry", 150.0, FLOOR_TOP, length),
+				],
 				"boss": _stand_on(356.0, FLOOR_TOP, BOSS_SPRITE_H),
 				"spawn": _stand_on(40.0, FLOOR_TOP, GRUNT_SPRITE_H),
 			}
 		_:
 			return {}
+
+
+static func _grunt_spec(duty: String, x: float, surface_top: float, length: float) -> Dictionary:
+	var pos := _stand_on(x, surface_top, GRUNT_SPRITE_H)
+	var min_x := pos.x
+	var max_x := pos.x
+	if duty == "runner":
+		min_x = maxf(8.0, pos.x - RUNNER_PATROL_HALF)
+		max_x = minf(length - 8.0, pos.x + RUNNER_PATROL_HALF)
+	return {
+		"duty": duty,
+		"pos": pos,
+		"min_x": min_x,
+		"max_x": max_x,
+	}
+
+
+static func _slot_as_dict(slot: Variant, default_duty: String) -> Dictionary:
+	if slot is Dictionary:
+		var spec: Dictionary = slot
+		var pos: Vector2 = spec["pos"]
+		return {
+			"duty": str(spec.get("duty", default_duty)),
+			"pos": pos,
+			"min_x": float(spec.get("min_x", pos.x)),
+			"max_x": float(spec.get("max_x", pos.x)),
+		}
+	var stand: Vector2 = slot
+	return {
+		"duty": default_duty,
+		"pos": stand,
+		"min_x": stand.x - RUNNER_PATROL_HALF,
+		"max_x": stand.x + RUNNER_PATROL_HALF,
+	}
+
+
+static func _player_constant(name: String, fallback: float) -> float:
+	if not ResourceLoader.exists(PLAYER_PATH):
+		return fallback
+	var script: Script = load(PLAYER_PATH)
+	if script == null:
+		return fallback
+	var constants: Dictionary = script.get_script_constant_map()
+	if not constants.has(name):
+		return fallback
+	var value: Variant = constants[name]
+	if typeof(value) == TYPE_INT or typeof(value) == TYPE_FLOAT:
+		return float(value)
+	return fallback
+
+
+static func _boss_is_dead(stage: Node) -> bool:
+	var bosses: Array[Node] = []
+	_collect_parts(stage, "boss", bosses)
+	if bosses.is_empty():
+		return false
+	for unit in bosses:
+		if _is_living(unit):
+			return false
+	return true
+
+
+static func _collect_parts(node: Node, part: String, into: Array[Node]) -> void:
+	if str(node.get_meta("stage_part", "")) == part:
+		into.append(node)
+	for child in node.get_children():
+		_collect_parts(child, part, into)
 
 
 static func _clamp_center(center: float, bound_min: float, bound_max: float, view_span: float) -> float:
@@ -533,19 +693,34 @@ static func _add_solid(
 	parent.add_child(body)
 
 
-static func _make_hostile(kind: String, pos: Vector2, min_x: float, max_x: float) -> Node2D:
-	var unit: Node2D = _try_hostiles_unit(kind, pos, min_x, max_x)
+static func _make_hostile(
+	kind: String,
+	pos: Vector2,
+	min_x: float,
+	max_x: float,
+	duty: String = ""
+) -> Node2D:
+	var slot_duty := duty if duty != "" else kind
+	var unit: Node2D = _try_hostiles_unit(kind, pos, min_x, max_x, slot_duty)
 	var stand_in := unit == null
 	if stand_in:
 		unit = _stand_in_hostile(kind, pos)
 	unit.set_meta("stage_part", kind)
+	unit.set_meta("duty", slot_duty)
+	unit.set_meta("alive", true)
 	unit.set_meta("hostile_stand_in", stand_in)
 	if not _has_visible_pixel_body(unit):
 		_attach_pixel_body(unit, kind)
 	return unit
 
 
-static func _try_hostiles_unit(kind: String, pos: Vector2, min_x: float, max_x: float) -> Node2D:
+static func _try_hostiles_unit(
+	kind: String,
+	pos: Vector2,
+	min_x: float,
+	max_x: float,
+	duty: String
+) -> Node2D:
 	if not ResourceLoader.exists(HOSTILES_PATH):
 		return null
 	var script: Script = load(HOSTILES_PATH)
@@ -557,10 +732,13 @@ static func _try_hostiles_unit(kind: String, pos: Vector2, min_x: float, max_x: 
 			inst.free()
 		return null
 	var unit := inst as Node2D
-	if kind == "boss" and unit.has_method("configure_boss"):
+	if (kind == "boss" or duty == "boss") and unit.has_method("configure_boss"):
 		unit.call("configure_boss", pos)
 	elif unit.has_method("configure_grunt"):
-		unit.call("configure_grunt", pos, min_x, max_x)
+		if duty == "sentry":
+			unit.call("configure_grunt", pos, pos.x, pos.x)
+		else:
+			unit.call("configure_grunt", pos, min_x, max_x)
 	else:
 		unit.position = pos
 	return unit

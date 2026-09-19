@@ -172,6 +172,7 @@ class PlayerProjectile:
 	var _velocity: Vector2 = Vector2.ZERO
 	var _max_range: float = 0.0
 	var _travelled: float = 0.0
+	var _hit_ids: Dictionary = {}
 	var damage: int = 0
 	var pierce: bool = false
 
@@ -188,6 +189,8 @@ class PlayerProjectile:
 		set_meta("player_shot", true)
 		set_meta("damage", shot.damage)
 		set_meta("pierce", shot.pierce)
+		if not body_entered.is_connected(_on_body_entered):
+			body_entered.connect(_on_body_entered)
 		var sprite := Sprite2D.new()
 		var width := 10 if shot.is_energy else 4
 		var height := 2 if shot.is_energy else 4
@@ -202,12 +205,42 @@ class PlayerProjectile:
 		col.shape = shape
 		add_child(col)
 
+	## 玩家弹打中地面或杂兵/头目。命中杂兵头目扣血；步枪与散弹停在第一击，激光穿过目标。
+	func resolve_hit(body: Node) -> void:
+		if body == null or not is_instance_valid(body):
+			return
+		if is_queued_for_deletion():
+			return
+		var id := body.get_instance_id()
+		if _hit_ids.has(id):
+			return
+		_hit_ids[id] = true
+		if body.has_method("take_damage") and body.get("alive") != null:
+			body.call("take_damage", damage)
+			if not pierce:
+				queue_free()
+			return
+		queue_free()
+
+	func _on_body_entered(body: Node) -> void:
+		resolve_hit(body)
+
 	func _physics_process(delta: float) -> void:
 		var step := _velocity.length() * delta
 		position += _velocity * delta
 		_travelled += step
 		if _travelled >= _max_range:
 			queue_free()
+			return
+		_resolve_overlaps()
+
+	func _resolve_overlaps() -> void:
+		if not is_inside_tree() or not monitoring:
+			return
+		for body in get_overlapping_bodies():
+			resolve_hit(body)
+			if is_queued_for_deletion():
+				return
 
 
 class MuzzleFlash:

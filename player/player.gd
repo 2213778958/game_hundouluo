@@ -11,6 +11,15 @@ const JUMP_VELOCITY := -320.0
 const GRAVITY := 900.0
 const MUZZLE_OFFSET := 10.0
 
+## 左移动作。与跳跃、开火键位不相交。
+const ACTION_LEFT := "player_left"
+## 右移动作。与跳跃、开火键位不相交。
+const ACTION_RIGHT := "player_right"
+## 跳跃动作。不与开火共用键。
+const ACTION_JUMP := "player_jump"
+## 开火动作。不与跳跃共用键。
+const ACTION_FIRE := "player_fire"
+
 ## 当前血量。
 var hp: int = MAX_HP
 ## 水平朝向，开火与精灵翻转用。
@@ -35,6 +44,7 @@ func _init() -> void:
 	collision_layer = 2
 	collision_mask = 1
 	loadout = ArsenalScript.new(ArsenalScript.Kind.RIFLE)
+	ensure_control_actions()
 	_setup_body()
 	_setup_look()
 
@@ -80,6 +90,25 @@ func take_damage(amount: int) -> void:
 		_restart_current_stage()
 
 
+## 注册方向、跳跃、开火动作。跳跃与开火键位不相交，可同时按。
+func ensure_control_actions() -> void:
+	_bind_keys(ACTION_LEFT, [KEY_LEFT, KEY_A])
+	_bind_keys(ACTION_RIGHT, [KEY_RIGHT, KEY_D])
+	_bind_keys(ACTION_JUMP, [KEY_SPACE])
+	_bind_keys(ACTION_FIRE, [KEY_Z, KEY_J])
+	_bind_mouse(ACTION_FIRE, MOUSE_BUTTON_LEFT)
+
+
+## 读本帧方向、跳、开火。三套动作可同时生效。
+func apply_controls(now_sec: float) -> void:
+	ensure_control_actions()
+	apply_run(Input.get_axis(ACTION_LEFT, ACTION_RIGHT))
+	if Input.is_action_just_pressed(ACTION_JUMP):
+		jump()
+	if Input.is_action_pressed(ACTION_FIRE):
+		fire(now_sec)
+
+
 ## 开火调用 arsenal。冷却中返回空齐射。
 func fire(now_sec: float) -> RefCounted:
 	var aim := facing
@@ -101,18 +130,50 @@ func fire(now_sec: float) -> RefCounted:
 
 func _physics_process(delta: float) -> void:
 	on_ground = is_on_floor()
-	var axis := 0.0
-	if InputMap.has_action("ui_left") and InputMap.has_action("ui_right"):
-		axis = Input.get_axis("ui_left", "ui_right")
-	apply_run(axis)
-	if InputMap.has_action("ui_accept") and Input.is_action_just_pressed("ui_accept"):
-		jump()
-	if InputMap.has_action("ui_select") and Input.is_action_pressed("ui_select"):
-		fire(Time.get_ticks_msec() / 1000.0)
+	apply_controls(Time.get_ticks_msec() / 1000.0)
 	if not on_ground:
 		velocity.y += GRAVITY * delta
 	move_and_slide()
 	on_ground = is_on_floor()
+
+
+func _bind_keys(action: String, keycodes: Array) -> void:
+	if not InputMap.has_action(action):
+		InputMap.add_action(action)
+	for keycode in keycodes:
+		var code: int = int(keycode)
+		if _has_key_event(action, code):
+			continue
+		var ev := InputEventKey.new()
+		ev.keycode = code as Key
+		ev.physical_keycode = code as Key
+		InputMap.action_add_event(action, ev)
+
+
+func _bind_mouse(action: String, button: MouseButton) -> void:
+	if not InputMap.has_action(action):
+		InputMap.add_action(action)
+	if _has_mouse_event(action, button):
+		return
+	var ev := InputEventMouseButton.new()
+	ev.button_index = button
+	InputMap.action_add_event(action, ev)
+
+
+func _has_key_event(action: String, keycode: int) -> bool:
+	for ev in InputMap.action_get_events(action):
+		if ev is InputEventKey:
+			var key_ev := ev as InputEventKey
+			if int(key_ev.physical_keycode) == keycode or int(key_ev.keycode) == keycode:
+				return true
+	return false
+
+
+func _has_mouse_event(action: String, button: MouseButton) -> bool:
+	for ev in InputMap.action_get_events(action):
+		if ev is InputEventMouseButton and (ev as InputEventMouseButton).button_index == button:
+			return true
+	return false
 
 
 func _restart_current_stage() -> void:

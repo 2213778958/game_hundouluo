@@ -14,14 +14,17 @@ const STAGE_COUNT := 3
 
 const HOSTILES_PATH := "res://hostiles/hostiles.gd"
 const FLOOR_TOP := 300.0
-const FLOOR_THICKNESS := 40.0
+const FLOOR_THICKNESS := 48.0
 const VIEW_HEIGHT := 360.0
 const WORLD_LAYER := 1
+const GRUNT_SPRITE_H := 40
+const BOSS_SPRITE_H := 64
 const VOID := Color(0.03, 0.04, 0.09)
 const NEON := Color(0.12, 0.95, 1.0)
 const MAGENTA := Color(1.0, 0.22, 0.86)
-const SLAB := Color(0.07, 0.12, 0.22)
-const COVER_FILL := Color(0.14, 0.08, 0.26)
+const SLAB := Color(0.10, 0.18, 0.32)
+const FLOOR_FILL := Color(0.16, 0.26, 0.42)
+const COVER_FILL := Color(0.22, 0.10, 0.38)
 
 
 func _init() -> void:
@@ -121,7 +124,7 @@ static func build_stage(stage_index: int) -> Node2D:
 		"Floor",
 		Vector2(length * 0.5, FLOOR_TOP + FLOOR_THICKNESS * 0.5),
 		Vector2(length, FLOOR_THICKNESS),
-		SLAB,
+		FLOOR_FILL,
 		NEON
 	)
 	if bool(spec["corridor"]):
@@ -217,9 +220,12 @@ static func _layout(stage_index: int) -> Dictionary:
 				"ceiling_bottom": 0.0,
 				"platforms": [],
 				"covers": [],
-				"grunts": [Vector2(280.0, 284.0), Vector2(460.0, 284.0)],
+				"grunts": [
+					_stand_on(280.0, FLOOR_TOP, GRUNT_SPRITE_H),
+					_stand_on(460.0, FLOOR_TOP, GRUNT_SPRITE_H),
+				],
 				"boss": Vector2.ZERO,
-				"spawn": Vector2(48.0, 284.0),
+				"spawn": _stand_on(48.0, FLOOR_TOP, GRUNT_SPRITE_H),
 			}
 		STAGE_COVER:
 			return {
@@ -232,19 +238,19 @@ static func _layout(stage_index: int) -> Dictionary:
 					Rect2(520.0, 220.0, 96.0, 12.0),
 				],
 				"covers": [
-					Rect2(248.0, 252.0, 16.0, 48.0),
-					Rect2(400.0, 252.0, 16.0, 48.0),
-					Rect2(568.0, 252.0, 16.0, 48.0),
+					Rect2(240.0, 236.0, 24.0, 64.0),
+					Rect2(392.0, 236.0, 24.0, 64.0),
+					Rect2(560.0, 236.0, 24.0, 64.0),
 				],
 				"grunts": [
-					Vector2(220.0, 284.0),
-					Vector2(380.0, 284.0),
-					Vector2(620.0, 284.0),
-					Vector2(216.0, 208.0),
-					Vector2(392.0, 164.0),
+					_stand_on(220.0, FLOOR_TOP, GRUNT_SPRITE_H),
+					_stand_on(380.0, FLOOR_TOP, GRUNT_SPRITE_H),
+					_stand_on(620.0, FLOOR_TOP, GRUNT_SPRITE_H),
+					_stand_on(216.0, 220.0, GRUNT_SPRITE_H),
+					_stand_on(392.0, 176.0, GRUNT_SPRITE_H),
 				],
 				"boss": Vector2.ZERO,
-				"spawn": Vector2(48.0, 284.0),
+				"spawn": _stand_on(48.0, FLOOR_TOP, GRUNT_SPRITE_H),
 			}
 		STAGE_BOSS:
 			return {
@@ -254,8 +260,8 @@ static func _layout(stage_index: int) -> Dictionary:
 				"platforms": [],
 				"covers": [],
 				"grunts": [],
-				"boss": Vector2(356.0, 280.0),
-				"spawn": Vector2(40.0, 284.0),
+				"boss": _stand_on(356.0, FLOOR_TOP, BOSS_SPRITE_H),
+				"spawn": _stand_on(40.0, FLOOR_TOP, GRUNT_SPRITE_H),
 			}
 		_:
 			return {}
@@ -270,6 +276,10 @@ static func _add_backdrop(parent: Node2D, length: float) -> void:
 	backdrop.z_index = -10
 	backdrop.set_meta("stage_part", "backdrop")
 	parent.add_child(backdrop)
+
+
+static func _stand_on(x: float, surface_top: float, sprite_h: int) -> Vector2:
+	return Vector2(x, surface_top - float(sprite_h) * 0.5)
 
 
 static func _add_solid(
@@ -293,6 +303,9 @@ static func _add_solid(
 	col.shape = shape
 	body.add_child(col)
 	var sprite := Sprite2D.new()
+	sprite.visible = true
+	sprite.modulate = Color.WHITE
+	sprite.self_modulate = Color.WHITE
 	sprite.texture = _slab_texture(fill, edge, maxi(int(size.x), 2), maxi(int(size.y), 2))
 	sprite.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	body.add_child(sprite)
@@ -301,9 +314,11 @@ static func _add_solid(
 
 static func _make_hostile(kind: String, pos: Vector2, min_x: float, max_x: float) -> Node2D:
 	var unit: Node2D = _try_hostiles_unit(kind, pos, min_x, max_x)
-	if unit == null:
+	var stand_in := unit == null
+	if stand_in:
 		unit = _stand_in_hostile(kind, pos)
 	unit.set_meta("stage_part", kind)
+	unit.set_meta("hostile_stand_in", stand_in)
 	if not _has_visible_pixel_body(unit):
 		_attach_pixel_body(unit, kind)
 	return unit
@@ -334,8 +349,10 @@ static func _stand_in_hostile(kind: String, pos: Vector2) -> Sprite2D:
 	var body := Sprite2D.new()
 	body.position = pos
 	body.centered = true
-	body.z_index = 1
+	body.z_index = 2
 	body.visible = true
+	body.modulate = Color.WHITE
+	body.self_modulate = Color.WHITE
 	body.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	body.texture = _boss_pixel_texture() if kind == "boss" else _grunt_pixel_texture()
 	return body
@@ -345,8 +362,10 @@ static func _attach_pixel_body(unit: Node2D, kind: String) -> void:
 	var sprite := Sprite2D.new()
 	sprite.name = "PixelBody"
 	sprite.centered = true
-	sprite.z_index = 1
+	sprite.z_index = 2
 	sprite.visible = true
+	sprite.modulate = Color.WHITE
+	sprite.self_modulate = Color.WHITE
 	sprite.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	sprite.texture = _boss_pixel_texture() if kind == "boss" else _grunt_pixel_texture()
 	unit.add_child(sprite)
@@ -377,67 +396,79 @@ static func _opaque_pixel_count(image: Image) -> int:
 
 
 static func _grunt_pixel_texture() -> ImageTexture:
-	const WIDTH := 16
-	const HEIGHT := 20
+	const WIDTH := 32
+	const HEIGHT := 40
 	var image := Image.create(WIDTH, HEIGHT, false, Image.FORMAT_RGBA8)
-	var hull := Color(0.06, 0.18, 0.34)
+	var hull := Color(0.10, 0.32, 0.52)
 	var rim := Color(0.15, 0.98, 1.0)
 	var visor := Color(1.0, 0.28, 0.88)
 	var core := Color(0.25, 1.0, 0.62)
-	for y in range(5, 16):
-		for x in range(3, 13):
+	for y in range(10, 32):
+		for x in range(6, 26):
 			image.set_pixel(x, y, hull)
-	for y in range(6, 15):
-		image.set_pixel(3, y, rim)
-		image.set_pixel(12, y, rim)
-	for x in range(4, 12):
-		image.set_pixel(x, 5, rim)
-	for y in range(2, 6):
-		for x in range(5, 11):
+	for y in range(11, 31):
+		image.set_pixel(6, y, rim)
+		image.set_pixel(25, y, rim)
+	for x in range(7, 25):
+		image.set_pixel(x, 10, rim)
+	for y in range(2, 12):
+		for x in range(10, 22):
 			image.set_pixel(x, y, visor)
-	image.set_pixel(4, 3, visor)
-	image.set_pixel(11, 3, visor)
-	for y in range(16, 20):
-		for x in range(6, 10):
+	image.set_pixel(8, 5, visor)
+	image.set_pixel(23, 5, visor)
+	for y in range(32, 40):
+		for x in range(12, 20):
 			image.set_pixel(x, y, core)
-	image.set_pixel(5, 17, core)
-	image.set_pixel(10, 17, core)
+	image.set_pixel(10, 34, core)
+	image.set_pixel(21, 34, core)
 	return ImageTexture.create_from_image(image)
 
 
 static func _boss_pixel_texture() -> ImageTexture:
-	const WIDTH := 24
-	const HEIGHT := 32
+	const WIDTH := 48
+	const HEIGHT := 64
 	var image := Image.create(WIDTH, HEIGHT, false, Image.FORMAT_RGBA8)
-	var hull := Color(0.14, 0.08, 0.30)
-	var rim := Color(0.62, 0.22, 1.0)
+	var hull := Color(0.22, 0.10, 0.42)
+	var rim := Color(0.72, 0.28, 1.0)
 	var visor := Color(1.0, 0.24, 0.86)
 	var core := Color(0.18, 1.0, 0.90)
-	for y in range(7, 29):
-		for x in range(3, 21):
+	for y in range(14, 58):
+		for x in range(6, 42):
 			image.set_pixel(x, y, hull)
-	for y in range(8, 28):
-		image.set_pixel(3, y, rim)
-		image.set_pixel(20, y, rim)
-	for x in range(4, 20):
-		image.set_pixel(x, 7, rim)
-	for y in range(2, 8):
-		for x in range(7, 17):
+	for y in range(15, 57):
+		image.set_pixel(6, y, rim)
+		image.set_pixel(41, y, rim)
+	for x in range(7, 41):
+		image.set_pixel(x, 14, rim)
+	for y in range(2, 16):
+		for x in range(14, 34):
 			image.set_pixel(x, y, visor)
-	for y in range(13, 19):
-		for x in range(9, 15):
+	for y in range(26, 38):
+		for x in range(18, 30):
 			image.set_pixel(x, y, core)
-	image.set_pixel(11, 0, rim)
-	image.set_pixel(12, 0, rim)
-	image.set_pixel(11, 1, visor)
-	image.set_pixel(12, 1, visor)
+	image.set_pixel(22, 0, rim)
+	image.set_pixel(23, 0, rim)
+	image.set_pixel(24, 0, rim)
+	image.set_pixel(25, 0, rim)
+	image.set_pixel(22, 1, visor)
+	image.set_pixel(23, 1, visor)
+	image.set_pixel(24, 1, visor)
+	image.set_pixel(25, 1, visor)
 	return ImageTexture.create_from_image(image)
 
 
 static func _slab_texture(fill: Color, edge: Color, width: int, height: int) -> ImageTexture:
 	var image := Image.create(width, height, false, Image.FORMAT_RGBA8)
 	image.fill(fill)
-	var rim := mini(2, height)
+	var plate := 16
+	var seam := Color(fill.r * 0.55, fill.g * 0.55, fill.b * 0.55, 1.0)
+	for x in range(0, width, plate):
+		for y in range(height):
+			image.set_pixel(x, y, seam)
+	for y in range(0, height, plate):
+		for x in range(width):
+			image.set_pixel(x, y, seam)
+	var rim := mini(3, height)
 	for y in range(rim):
 		for x in range(width):
 			image.set_pixel(x, y, edge)

@@ -10,6 +10,8 @@ func run() -> PackedStringArray:
 	_cover_stage_has_platforms_and_denser_fire(failures)
 	_boss_stage_is_short_corridor(failures)
 	_hostiles_have_visible_pixel_bodies(failures)
+	_absent_hostiles_are_opaque_sprite2d(failures)
+	_solids_are_visible_pixels(failures)
 	_not_a_level_editor(failures)
 	_pixel_look_is_neon_scifi(failures)
 	_install_registers_builders(failures)
@@ -178,6 +180,76 @@ func _hostiles_have_visible_pixel_bodies(failures: PackedStringArray) -> void:
 		stage.free()
 
 
+func _absent_hostiles_are_opaque_sprite2d(failures: PackedStringArray) -> void:
+	var hostiles_present := ResourceLoader.exists("res://hostiles/hostiles.gd")
+	if hostiles_present:
+		return
+	var stage1: Node2D = StagesScript.build_stage(1)
+	_check(failures, stage1 != null, "absent hostiles: 平地练手 must build")
+	if stage1 != null:
+		var grunts := _find_parts(stage1, "grunt")
+		_check(failures, grunts.size() >= 1, "absent hostiles: 平地练手 still has 杂兵")
+		for grunt in grunts:
+			_check(failures, grunt is Sprite2D, "absent hostiles: 杂兵 %s must be Sprite2D" % grunt.name)
+			_check(failures, not (grunt is Marker2D), "absent hostiles: 杂兵 must not be Marker2D")
+			_check(failures, bool(grunt.get_meta("hostile_stand_in", false)), "absent hostiles: 杂兵 is a stand-in")
+			_assert_visible_pixel_body(failures, grunt, "absent hostiles 杂兵 %s" % grunt.name)
+			if grunt is Sprite2D:
+				var sprite := grunt as Sprite2D
+				_check(failures, sprite.self_modulate.a >= 1.0, "absent hostiles: 杂兵 self_modulate must stay opaque")
+				if sprite.texture != null:
+					var image: Image = sprite.texture.get_image()
+					if image != null:
+						_check(
+							failures,
+							image.get_width() >= 24 and image.get_height() >= 24,
+							"absent hostiles: 杂兵 %s texture %sx%s must be large enough to see"
+							% [grunt.name, image.get_width(), image.get_height()]
+						)
+		stage1.free()
+	var stage3: Node2D = StagesScript.build_stage(3)
+	_check(failures, stage3 != null, "absent hostiles: 短通道头目 must build")
+	if stage3 != null:
+		var boss := _find_part(stage3, "boss")
+		_check(failures, boss != null, "absent hostiles: 头目 node must exist")
+		if boss != null:
+			_check(failures, boss is Sprite2D, "absent hostiles: 头目 must be Sprite2D")
+			_check(failures, not (boss is Marker2D), "absent hostiles: 头目 must not be Marker2D")
+			_check(failures, bool(boss.get_meta("hostile_stand_in", false)), "absent hostiles: 头目 is a stand-in")
+			_assert_visible_pixel_body(failures, boss, "absent hostiles 头目")
+		stage3.free()
+
+
+func _solids_are_visible_pixels(failures: PackedStringArray) -> void:
+	var flat: Node2D = StagesScript.build_stage(1)
+	_check(failures, flat != null, "visible solids need 平地练手")
+	if flat != null:
+		_assert_visible_solid(failures, _find_part(flat, "floor"), "平地练手 floor", 600, 40)
+		flat.free()
+	var cover: Node2D = StagesScript.build_stage(2)
+	_check(failures, cover != null, "visible solids need 高台掩体")
+	if cover != null:
+		_assert_visible_solid(failures, _find_part(cover, "floor"), "高台掩体 floor", 600, 40)
+		var platforms := _find_parts(cover, "platform")
+		_check(failures, platforms.size() >= 2, "高台掩体 visible solids need 高台")
+		for platform in platforms:
+			_assert_visible_solid(failures, platform, "高台 %s" % platform.name, 80, 8)
+		var covers := _find_parts(cover, "cover")
+		_check(failures, covers.size() >= 2, "高台掩体 visible solids need 掩体")
+		for box in covers:
+			_assert_visible_solid(failures, box, "掩体 %s" % box.name, 16, 48)
+		cover.free()
+	var corridor: Node2D = StagesScript.build_stage(3)
+	_check(failures, corridor != null, "visible solids need 短通道头目")
+	if corridor != null:
+		_assert_visible_solid(failures, _find_part(corridor, "floor"), "短通道 floor", 400, 40)
+		var walls := _find_parts(corridor, "corridor")
+		_check(failures, walls.size() >= 1, "短通道 needs visible corridor solids")
+		for wall in walls:
+			_assert_visible_solid(failures, wall, "短通道 %s" % wall.name, 8, 8)
+		corridor.free()
+
+
 func _not_a_level_editor(failures: PackedStringArray) -> void:
 	var src := FileAccess.get_file_as_string("res://stages/stages.gd")
 	_check(failures, not src.contains("func save_stage"), "stages must not save edited layouts")
@@ -335,6 +407,34 @@ func _assert_visible_pixel_body(failures: PackedStringArray, node: Node, label: 
 	_check(failures, image.get_width() >= 8 and image.get_height() >= 8, "%s pixel body must be large enough to see" % label)
 	var opaque := _opaque_pixel_count(image)
 	_check(failures, opaque >= 16, "%s must paint a visible pixel body, got %s opaque pixels" % [label, opaque])
+	_check(failures, _has_neon_pixel(image), "%s pixels must include neon sci-fi color" % label)
+
+
+func _assert_visible_solid(failures: PackedStringArray, node: Node, label: String, min_w: int, min_h: int) -> void:
+	_check(failures, node != null, "%s node must exist" % label)
+	if node == null:
+		return
+	_check(failures, node is CanvasItem, "%s must be a CanvasItem" % label)
+	var sprite := _find_visible_pixel_sprite(node)
+	_check(failures, sprite != null, "%s needs a visible opaque Sprite2D" % label)
+	if sprite == null:
+		return
+	_check(failures, sprite.visible, "%s sprite must be visible" % label)
+	_check(failures, sprite.modulate.a >= 0.5, "%s sprite modulate must stay opaque" % label)
+	_check(failures, sprite.texture != null, "%s sprite needs a texture" % label)
+	if sprite.texture == null:
+		return
+	var image: Image = sprite.texture.get_image()
+	_check(failures, image != null, "%s texture must decode" % label)
+	if image == null:
+		return
+	_check(
+		failures,
+		image.get_width() >= min_w and image.get_height() >= min_h,
+		"%s sprite size %sx%s must be at least %sx%s" % [label, image.get_width(), image.get_height(), min_w, min_h]
+	)
+	var opaque := _opaque_pixel_count(image)
+	_check(failures, opaque >= 64, "%s must paint visible pixels, got %s" % [label, opaque])
 	_check(failures, _has_neon_pixel(image), "%s pixels must include neon sci-fi color" % label)
 
 

@@ -1,6 +1,7 @@
 extends RefCounted
 
 const ArsenalScript := preload("res://arsenal/arsenal.gd")
+const HostileScript := preload("res://hostiles/hostiles.gd")
 
 ## Independent three-stage HP budget. Hostiles may match these later.
 const STAGE1_HP := 32
@@ -22,6 +23,9 @@ func run() -> PackedStringArray:
 	_each_weapon_can_finish_three_stages(failures)
 	_muzzle_and_energy_are_neon(failures)
 	_spawned_shot_is_player_not_enemy(failures)
+	_player_shots_hit_grunt_and_boss(failures)
+	_rifle_and_shotgun_stop_laser_pierces(failures)
+	_player_shot_does_not_hurt_player(failures)
 	_only_three_player_kinds(failures)
 	return failures
 
@@ -198,16 +202,131 @@ func _spawned_shot_is_player_not_enemy(failures: PackedStringArray) -> void:
 		_check(failures, body.collision_layer == expected_layer, "player shot uses PLAYER_SHOT_LAYER")
 		_check(
 			failures,
+			body.collision_mask == ArsenalScript.PLAYER_SHOT_MASK,
+			"player shot mask detects ground and 杂兵/头目"
+		)
+		_check(
+			failures,
+			ArsenalScript.PLAYER_SHOT_MASK & 1 != 0,
+			"player shot mask includes ground"
+		)
+		_check(
+			failures,
+			ArsenalScript.PLAYER_SHOT_MASK & 4 != 0,
+			"player shot mask includes 杂兵/头目"
+		)
+		_check(
+			failures,
 			body.get_meta("player_shot") == true,
 			"spawned body is marked as a player shot"
 		)
 		_check(failures, not body.has_meta("enemy_shot"), "arsenal must not spawn enemy shots")
+		_check(failures, body.has_method("resolve_hit"), "player shot must resolve hits")
 		body.free()
 	var muzzle: Node2D = volley.call("instantiate_muzzle")
 	_check(failures, muzzle != null, "fired volley must spawn a muzzle flash")
 	if muzzle != null:
 		_check(failures, muzzle.get_meta("muzzle_flash") == true, "muzzle node is a flash, not a tool")
 		muzzle.free()
+
+
+func _player_shots_hit_grunt_and_boss(failures: PackedStringArray) -> void:
+	for kind in [ArsenalScript.Kind.RIFLE, ArsenalScript.Kind.SHOTGUN, ArsenalScript.Kind.LASER]:
+		var grunt: CharacterBody2D = HostileScript.new()
+		grunt.call("configure_grunt", Vector2(80, 120))
+		var start_hp: int = grunt.get("hp")
+		var shot := _first_shot(kind)
+		if shot == null:
+			_check(failures, false, "kind %s hit check needs a shot" % kind)
+			grunt.free()
+			continue
+		var body: Area2D = shot.call("instantiate_projectile")
+		var expected := start_hp - int(shot.get("damage"))
+		body.call("resolve_hit", grunt)
+		_check(
+			failures,
+			grunt.get("hp") == expected,
+			"kind %s must drop 杂兵 hp by %s, got %s"
+			% [kind, shot.get("damage"), grunt.get("hp")]
+		)
+		_check(failures, grunt.get("alive") == true, "kind %s wound must not instantly kill 杂兵" % kind)
+		body.free()
+		grunt.free()
+		var boss: CharacterBody2D = HostileScript.new()
+		boss.call("configure_boss", Vector2(520, 120))
+		var boss_hp: int = boss.get("hp")
+		var boss_shot := _first_shot(kind)
+		var boss_body: Area2D = boss_shot.call("instantiate_projectile")
+		boss_body.call("resolve_hit", boss)
+		_check(
+			failures,
+			boss.get("hp") == boss_hp - int(boss_shot.get("damage")),
+			"kind %s must drop 头目 hp, got %s" % [kind, boss.get("hp")]
+		)
+		_check(failures, boss.get("alive") == true, "kind %s one pellet must not clear 头目" % kind)
+		boss_body.free()
+		boss.free()
+
+
+func _rifle_and_shotgun_stop_laser_pierces(failures: PackedStringArray) -> void:
+	var grunt: CharacterBody2D = HostileScript.new()
+	grunt.call("configure_grunt", Vector2(40, 80))
+	var rifle := _first_shot(ArsenalScript.Kind.RIFLE).call("instantiate_projectile") as Area2D
+	rifle.call("resolve_hit", grunt)
+	_check(failures, rifle.is_queued_for_deletion(), "rifle stops on the first 杂兵")
+	rifle.free()
+	var shotgun := _first_shot(ArsenalScript.Kind.SHOTGUN).call("instantiate_projectile") as Area2D
+	shotgun.call("resolve_hit", grunt)
+	_check(failures, shotgun.is_queued_for_deletion(), "shotgun pellet stops on the first 杂兵")
+	shotgun.free()
+	var laser := _first_shot(ArsenalScript.Kind.LASER).call("instantiate_projectile") as Area2D
+	var hp_before_laser: int = grunt.get("hp")
+	laser.call("resolve_hit", grunt)
+	var hp_after_first: int = grunt.get("hp")
+	_check(
+		failures,
+		hp_after_first == hp_before_laser - int(laser.get("damage")),
+		"laser damages the first 杂兵"
+	)
+	_check(failures, not laser.is_queued_for_deletion(), "laser pierces the first 杂兵")
+	laser.call("resolve_hit", grunt)
+	_check(failures, grunt.get("hp") == hp_after_first, "laser must not hit the same 杂兵 twice")
+	var other: CharacterBody2D = HostileScript.new()
+	other.call("configure_grunt", Vector2(90, 80))
+	var other_hp: int = other.get("hp")
+	laser.call("resolve_hit", other)
+	_check(
+		failures,
+		other.get("hp") == other_hp - int(laser.get("damage")),
+		"laser must still damage the next 杂兵"
+	)
+	_check(failures, not laser.is_queued_for_deletion(), "laser still flies after two 杂兵")
+	var ground := StaticBody2D.new()
+	ground.collision_layer = 1
+	laser.call("resolve_hit", ground)
+	_check(failures, laser.is_queued_for_deletion(), "laser stops on ground")
+	laser.free()
+	ground.free()
+	grunt.free()
+	other.free()
+
+
+func _player_shot_does_not_hurt_player(failures: PackedStringArray) -> void:
+	var dummy := PlayerStandIn.new()
+	var body: Area2D = _first_shot(ArsenalScript.Kind.RIFLE).call("instantiate_projectile")
+	body.call("resolve_hit", dummy)
+	_check(failures, dummy.hp == 5, "player shot must not spend damage on the player")
+	_check(failures, body.is_queued_for_deletion(), "non-hostile overlap still consumes the rifle shot")
+	body.free()
+	dummy.free()
+
+
+func _first_shot(kind: int) -> RefCounted:
+	var arsenal: RefCounted = ArsenalScript.new(kind)
+	var shots: Array = arsenal.call("fire", Vector2.ZERO, Vector2.RIGHT, 0.0).get("shots")
+	if shots.is_empty():
+		return null
+	return shots[0]
 
 
 func _only_three_player_kinds(failures: PackedStringArray) -> void:
@@ -225,3 +344,12 @@ func arsenal_has_no_enemy_fire() -> bool:
 		if dummy.has_method(method_name):
 			return false
 	return true
+
+
+class PlayerStandIn:
+	extends CharacterBody2D
+
+	var hp: int = 5
+
+	func take_damage(amount: int) -> void:
+		hp -= amount

@@ -33,6 +33,10 @@ const GRUNT_MUZZLE := Color(0.25, 1.0, 0.85)
 const GRUNT_SHOT_TINT := Color(0.15, 0.95, 1.0)
 const BOSS_MUZZLE := Color(1.0, 0.22, 0.9)
 const BOSS_SHOT_TINT := Color(1.0, 0.35, 1.0)
+## 打倒后侧躺，避免仍像站着的活人。
+const DEATH_FALL_RADIANS := PI * 0.5
+## 尸体变暗，和活着的霓虹外壳分开。
+const DEATH_MODULATE := Color(0.55, 0.62, 0.72)
 
 ## 当前身份：杂兵或头目。
 var role: Role = Role.GRUNT
@@ -77,7 +81,7 @@ func configure_grunt(spawn: Vector2, min_x: float = -100000.0, max_x: float = 10
 	_last_fire_sec = -1000.0
 	_resize_body(Vector2(12, 18))
 	_set_texture(_drone_texture())
-	_face_sprite()
+	_apply_alive_look()
 
 
 ## 配置为第三关头目。打倒即通关。
@@ -93,7 +97,7 @@ func configure_boss(spawn: Vector2) -> void:
 	_last_fire_sec = -1000.0
 	_resize_body(Vector2(18, 28))
 	_set_texture(_boss_texture())
-	_face_sprite()
+	_apply_alive_look()
 
 
 ## 杂兵水平走动。头目站住。axis 为 -1、0、1。
@@ -107,8 +111,10 @@ func apply_walk(axis: float) -> void:
 		_face_sprite()
 
 
-## 不聪明：朝目标水平转向。不寻路。
+## 不聪明：朝目标水平转向。不寻路。打倒后不再转身。
 func face_toward(world_pos: Vector2) -> void:
+	if not alive:
+		return
 	if world_pos.x < position.x:
 		facing = Vector2.LEFT
 	elif world_pos.x > position.x:
@@ -161,7 +167,7 @@ func fire(now_sec: float) -> EnemyVolley:
 	return volley
 
 
-## 被打中掉血。头目血归零发通关。
+## 被打中掉血。打倒后侧躺并换成残骸，看得出已经死了。头目血归零发通关。
 func take_damage(amount: int) -> void:
 	if not alive or amount <= 0:
 		return
@@ -170,6 +176,7 @@ func take_damage(amount: int) -> void:
 		return
 	alive = false
 	velocity = Vector2.ZERO
+	_apply_dead_look()
 	defeated.emit()
 	if role == Role.BOSS:
 		stage_cleared.emit(STAGE_BOSS)
@@ -235,6 +242,29 @@ func _face_sprite() -> void:
 	sprite.flip_h = facing.x > 0.0
 
 
+func _apply_alive_look() -> void:
+	collision_layer = BODY_LAYER
+	var sprite := get_node_or_null("Sprite2D") as Sprite2D
+	if sprite == null:
+		return
+	sprite.rotation = 0.0
+	sprite.modulate = Color.WHITE
+	sprite.visible = true
+	_face_sprite()
+
+
+func _apply_dead_look() -> void:
+	collision_layer = 0
+	var sprite := get_node_or_null("Sprite2D") as Sprite2D
+	if sprite == null:
+		return
+	sprite.rotation = DEATH_FALL_RADIANS
+	sprite.modulate = DEATH_MODULATE
+	sprite.visible = true
+	sprite.texture = _wrecked_boss_texture() if role == Role.BOSS else _wrecked_drone_texture()
+	sprite.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+
+
 func _drone_texture() -> ImageTexture:
 	const WIDTH := 16
 	const HEIGHT := 20
@@ -282,6 +312,42 @@ func _boss_texture() -> ImageTexture:
 	image.set_pixel(12, 0, trim)
 	image.set_pixel(11, 1, visor)
 	image.set_pixel(12, 1, visor)
+	return ImageTexture.create_from_image(image)
+
+
+func _wrecked_drone_texture() -> ImageTexture:
+	const WIDTH := 16
+	const HEIGHT := 20
+	var image := Image.create(WIDTH, HEIGHT, false, Image.FORMAT_RGBA8)
+	var hull := Color(0.05, 0.1, 0.16)
+	var crack := Color(0.2, 0.95, 1.0)
+	var spark := Color(1.0, 0.45, 0.15)
+	for y in range(8, 16):
+		for x in range(2, 14):
+			image.set_pixel(x, y, hull)
+	for x in range(4, 12):
+		image.set_pixel(x, 11, crack)
+	image.set_pixel(5, 9, spark)
+	image.set_pixel(10, 13, spark)
+	image.set_pixel(7, 15, crack)
+	return ImageTexture.create_from_image(image)
+
+
+func _wrecked_boss_texture() -> ImageTexture:
+	const WIDTH := 24
+	const HEIGHT := 32
+	var image := Image.create(WIDTH, HEIGHT, false, Image.FORMAT_RGBA8)
+	var hull := Color(0.08, 0.06, 0.14)
+	var crack := Color(0.7, 0.25, 1.0)
+	var spark := Color(0.25, 1.0, 0.8)
+	for y in range(12, 28):
+		for x in range(2, 22):
+			image.set_pixel(x, y, hull)
+	for x in range(5, 19):
+		image.set_pixel(x, 18, crack)
+	image.set_pixel(8, 15, spark)
+	image.set_pixel(15, 22, spark)
+	image.set_pixel(12, 24, crack)
 	return ImageTexture.create_from_image(image)
 
 

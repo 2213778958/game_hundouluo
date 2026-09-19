@@ -11,6 +11,7 @@ func run() -> PackedStringArray:
 	_boss_shoots(failures)
 	_defeating_boss_clears_stage(failures)
 	_defeating_grunt_is_not_clear(failures)
+	_defeated_hostiles_look_dead(failures)
 	_enemy_bullets_stay_in_hostiles(failures)
 	_pixel_look_is_future_drone(failures)
 	_no_scene_or_3d_nodes(failures)
@@ -155,6 +156,93 @@ func _defeating_grunt_is_not_clear(failures: PackedStringArray) -> void:
 	_check(failures, probe.defeated == 1, "杂兵 emits defeated")
 	_check(failures, probe.cleared == 0, "杂兵 must not count as 通关")
 	grunt.free()
+
+
+func _defeated_hostiles_look_dead(failures: PackedStringArray) -> void:
+	_assert_lethal_hits_show_death(_make_grunt(Vector2(80, 120)), "杂兵", failures)
+	_assert_lethal_hits_show_death(_make_boss(Vector2(520, 120)), "头目", failures)
+
+
+func _assert_lethal_hits_show_death(
+	unit: CharacterBody2D, label: String, failures: PackedStringArray
+) -> void:
+	var sprite := _find_sprite(unit)
+	_check(failures, sprite != null, "%s needs a sprite before death" % label)
+	if sprite == null:
+		unit.free()
+		return
+	var living_image: Image = sprite.texture.get_image() if sprite.texture != null else null
+	_check(failures, is_zero_approx(sprite.rotation), "活着的%s stands upright" % label)
+	_check(
+		failures,
+		unit.collision_layer == HostileScript.BODY_LAYER,
+		"活着的%s occupies BODY_LAYER" % label
+	)
+	_check(failures, sprite.modulate.v >= 0.95, "活着的%s is fully lit" % label)
+	unit.call("take_damage", 1)
+	_check(failures, unit.get("alive") == true, "one hit does not kill %s" % label)
+	_check(failures, is_zero_approx(sprite.rotation), "wounded %s still stands" % label)
+	_check(
+		failures,
+		unit.collision_layer == HostileScript.BODY_LAYER,
+		"wounded %s still occupies BODY_LAYER" % label
+	)
+	_check(
+		failures,
+		_same_pixels(living_image, sprite.texture.get_image() if sprite.texture != null else null),
+		"wounded %s keeps living look" % label
+	)
+	unit.call("take_damage", int(unit.get("hp")))
+	_check(failures, unit.get("alive") == false, "lethal hits defeat %s" % label)
+	_check(
+		failures,
+		is_equal_approx(absf(sprite.rotation), PI * 0.5),
+		"defeated %s lies on its side, got rotation %s" % [label, sprite.rotation]
+	)
+	_check(failures, sprite.visible, "defeated %s stays on screen as a corpse" % label)
+	_check(failures, sprite.texture != null, "defeated %s still has pixels" % label)
+	var dead_image: Image = sprite.texture.get_image() if sprite.texture != null else null
+	_check(
+		failures,
+		not _same_pixels(living_image, dead_image),
+		"defeated %s wreck look must differ from living" % label
+	)
+	if dead_image != null:
+		_check(failures, _has_neon_pixel(dead_image), "defeated %s wreck stays neon sci-fi" % label)
+	_check(failures, unit.collision_layer == 0, "defeated %s is no longer a living body" % label)
+	_check(failures, sprite.modulate.v < 0.85, "defeated %s is dimmed" % label)
+	unit.call("apply_walk", 1.0)
+	unit.call("face_toward", Vector2(unit.position.x + 80.0, unit.position.y))
+	_check(
+		failures,
+		is_equal_approx(absf(sprite.rotation), PI * 0.5),
+		"dead %s stays fallen after walk/face" % label
+	)
+	_check(failures, unit.collision_layer == 0, "dead %s stays off BODY_LAYER" % label)
+	if label == "杂兵":
+		unit.call("configure_grunt", unit.position)
+	else:
+		unit.call("configure_boss", unit.position)
+	_check(failures, unit.get("alive") == true, "reconfigured %s is alive" % label)
+	_check(failures, is_zero_approx(sprite.rotation), "reconfigured %s stands again" % label)
+	_check(
+		failures,
+		unit.collision_layer == HostileScript.BODY_LAYER,
+		"reconfigured %s occupies BODY_LAYER" % label
+	)
+	unit.free()
+
+
+func _same_pixels(a: Image, b: Image) -> bool:
+	if a == null or b == null:
+		return a == b
+	if a.get_width() != b.get_width() or a.get_height() != b.get_height():
+		return false
+	for y in a.get_height():
+		for x in a.get_width():
+			if a.get_pixel(x, y) != b.get_pixel(x, y):
+				return false
+	return true
 
 
 func _enemy_bullets_stay_in_hostiles(failures: PackedStringArray) -> void:

@@ -16,6 +16,7 @@ func run() -> PackedStringArray:
 	_pixel_look_is_neon_scifi(failures)
 	_install_registers_builders(failures)
 	_nodes_stay_off_tree_and_2d(failures)
+	_actor_and_camera_stay_inside_bounds(failures)
 	return failures
 
 
@@ -340,6 +341,155 @@ func _nodes_stay_off_tree_and_2d(failures: PackedStringArray) -> void:
 		_check(failures, stage.scene_file_path == "", "stage %s must not be a packed scene" % index)
 		_walk_no_3d(stage, failures)
 		stage.free()
+
+
+func _actor_and_camera_stay_inside_bounds(failures: PackedStringArray) -> void:
+	_check(failures, StagesScript.stage_bounds(0) == Rect2(), "stage 0 has no playable bounds")
+	_check(failures, StagesScript.stage_bounds(4) == Rect2(), "there is no fourth-stage bounds")
+	_check(
+		failures,
+		StagesScript.stage_bounds(1) == Rect2(0, 0, 640, 360),
+		"平地练手 bounds are the 640x360 map"
+	)
+	_check(
+		failures,
+		StagesScript.stage_bounds(2) == Rect2(0, 0, 720, 360),
+		"高台掩体 bounds are the 720x360 map"
+	)
+	_check(
+		failures,
+		StagesScript.stage_bounds(3) == Rect2(0, 0, 420, 360),
+		"通道头目 bounds are the 420x360 map"
+	)
+	_check(
+		failures,
+		StagesScript.clamp_actor(1, Vector2(-40, 200)) == Vector2(0, 200),
+		"actor cannot walk off the left of 平地练手"
+	)
+	_check(
+		failures,
+		StagesScript.clamp_actor(1, Vector2(800, 200)) == Vector2(640, 200),
+		"actor cannot walk off the right of 平地练手"
+	)
+	_check(
+		failures,
+		StagesScript.clamp_actor(1, Vector2(100, -20)) == Vector2(100, 0),
+		"actor cannot leave the top of the map"
+	)
+	_check(
+		failures,
+		StagesScript.clamp_actor(1, Vector2(100, 500)) == Vector2(100, 360),
+		"actor cannot fall out the bottom of the map"
+	)
+	_check(
+		failures,
+		StagesScript.clamp_actor(1, Vector2(120, 200)) == Vector2(120, 200),
+		"actor inside 平地练手 stays put"
+	)
+	_check(
+		failures,
+		StagesScript.clamp_actor(2, Vector2(900, 10)) == Vector2(720, 10),
+		"actor cannot walk past 高台掩体 length 720"
+	)
+	_check(
+		failures,
+		StagesScript.clamp_actor(3, Vector2(500, 200)) == Vector2(420, 200),
+		"actor cannot walk past 通道头目 length 420"
+	)
+	_check(
+		failures,
+		StagesScript.clamp_actor(0, Vector2(-9, 9)) == Vector2(-9, 9),
+		"clamp_actor on an illegal stage is a no-op"
+	)
+	_check(
+		failures,
+		StagesScript.clamp_camera(1, Vector2(0, 0)) == Vector2(320, 180),
+		"平地练手 fills the view: camera stays at the map center"
+	)
+	_check(
+		failures,
+		StagesScript.clamp_camera(1, Vector2(999, 999)) == Vector2(320, 180),
+		"平地练手 camera cannot pan off the 640x360 map"
+	)
+	_check(
+		failures,
+		StagesScript.clamp_camera(2, Vector2(200, 180)) == Vector2(320, 180),
+		"高台掩体 camera cannot show x < 0"
+	)
+	_check(
+		failures,
+		StagesScript.clamp_camera(2, Vector2(700, 180)) == Vector2(400, 180),
+		"高台掩体 camera cannot show x > 720"
+	)
+	_check(
+		failures,
+		StagesScript.clamp_camera(2, Vector2(360, 180)) == Vector2(360, 180),
+		"高台掩体 camera may follow inside 320..400"
+	)
+	_check(
+		failures,
+		StagesScript.clamp_camera(3, Vector2(0, 0)) == Vector2(320, 180),
+		"短通道 narrower than the view left-aligns the camera"
+	)
+	for index in range(1, 4):
+		var stage: Node2D = StagesScript.build_stage(index)
+		_check(failures, stage != null, "bounds check needs stage %s" % index)
+		if stage == null:
+			continue
+		_check(failures, _count_part(stage, "bound") >= 2, "stage %s needs left/right bound walls" % index)
+		var cam_node := _find_part(stage, "camera")
+		_check(failures, cam_node is Camera2D, "stage %s needs a Camera2D" % index)
+		if cam_node is Camera2D:
+			var cam := cam_node as Camera2D
+			var length := int(StagesScript.stage_length(index))
+			_check(failures, cam.limit_left == 0, "stage %s camera limit_left is 0" % index)
+			_check(failures, cam.limit_top == 0, "stage %s camera limit_top is 0" % index)
+			_check(failures, cam.limit_right == length, "stage %s camera limit_right is %s" % [index, length])
+			_check(failures, cam.limit_bottom == 360, "stage %s camera limit_bottom is 360" % index)
+			var actor := Node2D.new()
+			actor.position = Vector2(-80, 900)
+			StagesScript.keep_inside(stage, actor, cam)
+			var bounds: Rect2 = StagesScript.stage_bounds(index)
+			_check(
+				failures,
+				actor.position.x >= bounds.position.x and actor.position.x <= bounds.end.x,
+				"keep_inside clamps stage %s actor x into %s..%s, got %s"
+				% [index, bounds.position.x, bounds.end.x, actor.position.x]
+			)
+			_check(
+				failures,
+				actor.position.y >= bounds.position.y and actor.position.y <= bounds.end.y,
+				"keep_inside clamps stage %s actor y into %s..%s, got %s"
+				% [index, bounds.position.y, bounds.end.y, actor.position.y]
+			)
+			_check(
+				failures,
+				cam.position == StagesScript.clamp_camera(index, actor.position),
+				"keep_inside parks stage %s camera inside the map" % index
+			)
+			actor.free()
+		stage.free()
+	var host := Node2D.new()
+	host.name = "StageHost"
+	var cover: Node2D = StagesScript.build_stage(2)
+	_check(failures, cover != null, "scroll check needs 高台掩体")
+	if cover != null:
+		host.add_child(cover)
+		var walker := Node2D.new()
+		walker.position = Vector2(680, 200)
+		host.add_child(walker)
+		StagesScript.keep_inside(cover, walker)
+		_check(
+			failures,
+			is_equal_approx(walker.position.x, 680.0),
+			"actor still on the 720 map stays at 680, got %s" % walker.position.x
+		)
+		_check(
+			failures,
+			is_equal_approx(host.position.x, -80.0),
+			"StageHost must scroll -80 so 高台掩体 x=720 stays on screen, got %s" % host.position.x
+		)
+	host.free()
 
 
 func _walk_no_3d(node: Node, failures: PackedStringArray) -> void:

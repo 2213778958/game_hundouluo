@@ -15,7 +15,9 @@ const STAGE_COUNT := 3
 const HOSTILES_PATH := "res://hostiles/hostiles.gd"
 const FLOOR_TOP := 300.0
 const FLOOR_THICKNESS := 48.0
+const VIEW_WIDTH := 640.0
 const VIEW_HEIGHT := 360.0
+const BOUND_THICKNESS := 16.0
 const WORLD_LAYER := 1
 const GRUNT_SPRITE_H := 40
 const BOSS_SPRITE_H := 64
@@ -104,6 +106,62 @@ static func is_corridor(stage_index: int) -> bool:
 	return bool(_layout(stage_index)["corridor"])
 
 
+## 关卡世界矩形。左上为原点，宽是关长，高是视口高。非法序号为空矩形。
+static func stage_bounds(stage_index: int) -> Rect2:
+	if stage_index < 1 or stage_index > STAGE_COUNT:
+		return Rect2()
+	return Rect2(0.0, 0.0, stage_length(stage_index), VIEW_HEIGHT)
+
+
+## 把角色坐标夹在关卡边界内。非法序号原样返回。
+static func clamp_actor(stage_index: int, world_position: Vector2) -> Vector2:
+	var bounds := stage_bounds(stage_index)
+	if bounds.size == Vector2.ZERO:
+		return world_position
+	return Vector2(
+		clampf(world_position.x, bounds.position.x, bounds.end.x),
+		clampf(world_position.y, bounds.position.y, bounds.end.y)
+	)
+
+
+## 把视角中心夹在关卡内，使画面尽量不露出地图外。关卡比视口窄时左对齐。
+static func clamp_camera(
+	stage_index: int,
+	camera_center: Vector2,
+	view_size: Vector2 = Vector2.ZERO
+) -> Vector2:
+	var view := view_size
+	if view == Vector2.ZERO:
+		view = Vector2(VIEW_WIDTH, VIEW_HEIGHT)
+	var bounds := stage_bounds(stage_index)
+	if bounds.size == Vector2.ZERO:
+		return camera_center
+	return Vector2(
+		_clamp_center(camera_center.x, bounds.position.x, bounds.end.x, view.x),
+		_clamp_center(camera_center.y, bounds.position.y, bounds.end.y, view.y)
+	)
+
+
+## 把角色和视角留在本关边界内。StageHost 在固定 CanvasLayer 下会平移以跟随。
+static func keep_inside(
+	stage: Node2D,
+	actor: Node2D,
+	camera: Camera2D = null,
+	view_size: Vector2 = Vector2.ZERO
+) -> void:
+	if stage == null or actor == null:
+		return
+	var index := int(stage.get_meta("stage_index", 0))
+	actor.position = clamp_actor(index, actor.position)
+	var cam := camera
+	if cam == null:
+		cam = stage.get_node_or_null("StageCamera") as Camera2D
+	if cam != null:
+		cam.position = clamp_camera(index, actor.position, view_size)
+		_apply_camera_limits(cam, index)
+	_scroll_host(stage, index, actor.position, view_size)
+
+
 ## 建造一关写死场景。非法序号返回 null。
 static func build_stage(stage_index: int) -> Node2D:
 	if stage_index < 1 or stage_index > STAGE_COUNT:
@@ -118,6 +176,7 @@ static func build_stage(stage_index: int) -> Node2D:
 	root.set_meta("stage_length", length)
 	root.set_meta("player_spawn", spec["spawn"])
 	_add_backdrop(root, length)
+	_add_stage_bounds(root, length)
 	_add_solid(
 		root,
 		"floor",
@@ -265,6 +324,75 @@ static func _layout(stage_index: int) -> Dictionary:
 			}
 		_:
 			return {}
+
+
+static func _clamp_center(center: float, bound_min: float, bound_max: float, view_span: float) -> float:
+	var half := view_span * 0.5
+	var lo := bound_min + half
+	var hi := bound_max - half
+	if lo > hi:
+		return lo
+	return clampf(center, lo, hi)
+
+
+static func _apply_camera_limits(camera: Camera2D, stage_index: int) -> void:
+	var bounds := stage_bounds(stage_index)
+	camera.limit_left = int(bounds.position.x)
+	camera.limit_top = int(bounds.position.y)
+	camera.limit_right = int(bounds.end.x)
+	camera.limit_bottom = int(bounds.end.y)
+	camera.limit_smoothed = false
+	camera.position_smoothing_enabled = false
+
+
+static func _scroll_host(
+	stage: Node2D,
+	stage_index: int,
+	actor_pos: Vector2,
+	view_size: Vector2
+) -> void:
+	var host := stage.get_parent()
+	if host == null or not (host is Node2D) or str(host.name) != "StageHost":
+		return
+	var view := view_size
+	if view == Vector2.ZERO:
+		view = Vector2(VIEW_WIDTH, VIEW_HEIGHT)
+	var cam_center := clamp_camera(stage_index, actor_pos, view)
+	(host as Node2D).position = -(cam_center - view * 0.5)
+
+
+static func _add_stage_bounds(parent: Node2D, length: float) -> void:
+	var height := VIEW_HEIGHT + FLOOR_THICKNESS
+	_add_solid(
+		parent,
+		"bound",
+		"LeftBound",
+		Vector2(-BOUND_THICKNESS * 0.5, height * 0.5),
+		Vector2(BOUND_THICKNESS, height),
+		SLAB,
+		NEON
+	)
+	_add_solid(
+		parent,
+		"bound",
+		"RightBound",
+		Vector2(length + BOUND_THICKNESS * 0.5, height * 0.5),
+		Vector2(BOUND_THICKNESS, height),
+		SLAB,
+		NEON
+	)
+	var cam := Camera2D.new()
+	cam.name = "StageCamera"
+	cam.enabled = true
+	cam.position = Vector2(VIEW_WIDTH * 0.5, VIEW_HEIGHT * 0.5)
+	cam.set_meta("stage_part", "camera")
+	_apply_camera_limits(cam, int(parent.get_meta("stage_index", 0)))
+	parent.add_child(cam)
+	var keeper_script: Script = load("res://stages/bound_keeper.gd")
+	if keeper_script != null and keeper_script.can_instantiate():
+		var keeper: Node = keeper_script.new()
+		keeper.name = "BoundKeeper"
+		parent.add_child(keeper)
 
 
 static func _add_backdrop(parent: Node2D, length: float) -> void:

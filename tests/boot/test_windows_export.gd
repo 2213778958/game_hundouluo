@@ -5,6 +5,7 @@ func run() -> PackedStringArray:
 	var failures: PackedStringArray = []
 	_project_is_pixel_scifi_desktop(failures)
 	_boot_autoload_is_wired(failures)
+	_main_scene_is_defined(failures)
 	_windows_export_preset_exists(failures)
 	return failures
 
@@ -63,6 +64,35 @@ func _boot_autoload_is_wired(failures: PackedStringArray) -> void:
 		"Boot autoload must point at res://boot/boot.gd, got %s" % boot_path
 	)
 	_check(failures, boot_path.begins_with("*"), "Boot autoload must be a singleton (*), got %s" % boot_path)
+
+
+func _main_scene_is_defined(failures: PackedStringArray) -> void:
+	_check(
+		failures,
+		ProjectSettings.has_setting("application/run/main_scene"),
+		"project.godot must set run/main_scene so godot --path . can start"
+	)
+	var main_path := str(ProjectSettings.get_setting("application/run/main_scene"))
+	_check(
+		failures,
+		main_path == "res://boot/main.tscn",
+		"main scene must be res://boot/main.tscn, got %s" % main_path
+	)
+	_check(failures, ResourceLoader.exists(main_path), "main scene file must exist: %s" % main_path)
+	if not ResourceLoader.exists(main_path):
+		return
+	var packed: Resource = load(main_path)
+	_check(failures, packed is PackedScene, "main scene must be a PackedScene")
+	if not (packed is PackedScene):
+		return
+	var inst: Node = (packed as PackedScene).instantiate()
+	_check(failures, inst is Node2D, "main scene root must be Node2D, got %s" % inst.get_class())
+	_check(
+		failures,
+		not str(inst.get_class()).contains("3D"),
+		"main scene must not be a 3D node"
+	)
+	inst.free()
 
 
 func _windows_export_preset_exists(failures: PackedStringArray) -> void:

@@ -11,6 +11,9 @@ func run() -> PackedStringArray:
 	_hit_drops_hp(failures)
 	_empty_hp_restarts_stage_not_run(failures)
 	_fire_calls_arsenal(failures)
+	_run_jump_and_fire_together(failures)
+	_jump_and_fire_use_distinct_keys(failures)
+	_controls_can_run_jump_and_fire_together(failures)
 	_pixel_look_is_neon_scifi(failures)
 	return failures
 
@@ -123,6 +126,119 @@ func _fire_calls_arsenal(failures: PackedStringArray) -> void:
 		var vel: Vector2 = left_shots[0].get("velocity")
 		_check(failures, vel.x < 0.0, "facing left fires arsenal shots left")
 	left.free()
+
+
+func _run_jump_and_fire_together(failures: PackedStringArray) -> void:
+	var player := _make_player(ArsenalScript.Kind.RIFLE)
+	player.call("apply_run", 1.0)
+	player.set("on_ground", true)
+	var hopped: Variant = player.call("jump")
+	var volley: RefCounted = player.call("fire", 0.0)
+	_check(failures, player.velocity.x > 0.0, "run + jump + fire must keep running")
+	_check(failures, hopped == true, "run + jump + fire must still jump")
+	_check(failures, player.velocity.y < 0.0, "run + jump + fire keeps upward jump")
+	_check(failures, player.get("on_ground") == false, "run + jump + fire leaves the ground")
+	_check(failures, volley.get("fired") == true, "jumping fire must still call arsenal")
+	var midair: RefCounted = player.call("fire", 1.0)
+	_check(failures, midair.get("fired") == true, "airborne fire must still call arsenal")
+	_check(failures, player.velocity.y < 0.0, "airborne fire must not cancel jump")
+	player.free()
+
+
+func _jump_and_fire_use_distinct_keys(failures: PackedStringArray) -> void:
+	var player := _make_player()
+	player.call("ensure_control_actions")
+	var jump_ids := _bind_ids(PlayerScript.ACTION_JUMP)
+	var fire_ids := _bind_ids(PlayerScript.ACTION_FIRE)
+	var left_ids := _bind_ids(PlayerScript.ACTION_LEFT)
+	var right_ids := _bind_ids(PlayerScript.ACTION_RIGHT)
+	_check(failures, not jump_ids.is_empty(), "jump must bind at least one key")
+	_check(failures, not fire_ids.is_empty(), "fire must bind at least one key")
+	_check(failures, _sets_disjoint(jump_ids, fire_ids), "jump and fire must not share a key")
+	_check(failures, _sets_disjoint(left_ids, jump_ids), "run and jump must not share a key")
+	_check(failures, _sets_disjoint(right_ids, jump_ids), "run and jump must not share a key")
+	_check(failures, _sets_disjoint(left_ids, fire_ids), "run and fire must not share a key")
+	_check(failures, _sets_disjoint(right_ids, fire_ids), "run and fire must not share a key")
+	_check(failures, _sets_disjoint(left_ids, right_ids), "left and right must not share a key")
+	player.free()
+
+
+func _controls_can_run_jump_and_fire_together(failures: PackedStringArray) -> void:
+	var player := _make_player(ArsenalScript.Kind.RIFLE)
+	player.call("ensure_control_actions")
+	_release_player_actions()
+	Input.action_press(PlayerScript.ACTION_FIRE)
+	player.set("on_ground", true)
+	player.velocity = Vector2.ZERO
+	player.call("apply_controls", 0.0)
+	_check(failures, player.get("on_ground") == true, "fire action alone must not jump")
+	_check(failures, is_zero_approx(player.velocity.y), "fire action alone must not apply jump velocity")
+	var fire_again: RefCounted = player.call("fire", 0.001)
+	_check(failures, fire_again.get("fired") == false, "fire action must call arsenal")
+	_release_player_actions()
+
+	var jumper := _make_player(ArsenalScript.Kind.RIFLE)
+	jumper.call("ensure_control_actions")
+	Input.action_press(PlayerScript.ACTION_JUMP)
+	jumper.set("on_ground", true)
+	jumper.velocity = Vector2.ZERO
+	jumper.call("apply_controls", 1.0)
+	_check(failures, jumper.velocity.y < 0.0, "jump action alone must jump")
+	var jump_only_fire: RefCounted = jumper.call("fire", 1.0)
+	_check(failures, jump_only_fire.get("fired") == true, "jump action alone must not steal fire")
+	_release_player_actions()
+
+	var combo := _make_player(ArsenalScript.Kind.RIFLE)
+	combo.call("ensure_control_actions")
+	combo.set("on_ground", true)
+	combo.velocity = Vector2.ZERO
+	Input.action_press(PlayerScript.ACTION_RIGHT)
+	Input.action_press(PlayerScript.ACTION_JUMP)
+	Input.action_press(PlayerScript.ACTION_FIRE)
+	combo.call("apply_controls", 2.0)
+	_check(failures, combo.velocity.x > 0.0, "right + jump + fire must run")
+	_check(failures, combo.velocity.y < 0.0, "right + jump + fire must jump")
+	_check(failures, combo.get("on_ground") == false, "right + jump + fire leaves the ground")
+	var after_combo: RefCounted = combo.call("fire", 2.001)
+	_check(failures, after_combo.get("fired") == false, "right + jump + fire must still call arsenal")
+	_release_player_actions()
+	player.free()
+	jumper.free()
+	combo.free()
+
+
+func _bind_ids(action: String) -> Dictionary:
+	var ids := {}
+	if not InputMap.has_action(action):
+		return ids
+	for ev in InputMap.action_get_events(action):
+		if ev is InputEventKey:
+			var key_ev := ev as InputEventKey
+			var code: int = int(key_ev.physical_keycode)
+			if code == 0:
+				code = int(key_ev.keycode)
+			ids["k:%s" % code] = true
+		elif ev is InputEventMouseButton:
+			ids["m:%s" % int((ev as InputEventMouseButton).button_index)] = true
+	return ids
+
+
+func _sets_disjoint(left: Dictionary, right: Dictionary) -> bool:
+	for key in left.keys():
+		if right.has(key):
+			return false
+	return true
+
+
+func _release_player_actions() -> void:
+	for action in [
+		PlayerScript.ACTION_LEFT,
+		PlayerScript.ACTION_RIGHT,
+		PlayerScript.ACTION_JUMP,
+		PlayerScript.ACTION_FIRE,
+	]:
+		if InputMap.has_action(action):
+			Input.action_release(action)
 
 
 func _pixel_look_is_neon_scifi(failures: PackedStringArray) -> void:

@@ -231,9 +231,11 @@ func _build_entry() -> void:
 	backdrop.size = Vector2(640, 360)
 	_entry.add_child(backdrop)
 	_entry.add_child(_make_starfield())
-	_add_frame_corners(_entry)
+	_entry.add_child(_make_deck())
+	_entry.add_child(_make_frame())
 	_entry.add_child(_make_rail("RailLeft", Vector2(10, 28), Vector2(6, 304)))
 	_entry.add_child(_make_rail("RailRight", Vector2(624, 28), Vector2(6, 304)))
+	_entry.add_child(_make_status_bar())
 	_entry.add_child(_make_title_plate())
 	_entry.add_child(_make_label("TitleGlow", TITLE, Vector2(2, 30), 640, 28, Color(NEON, 0.28)))
 	_title = _make_label("Title", TITLE, Vector2(0, 28), 640, 28, NEON)
@@ -241,10 +243,11 @@ func _build_entry() -> void:
 	_entry.add_child(_make_label("Tag", "像素科幻 · 三关突击", Vector2(0, 62), 640, 12, Color(0.55, 0.9, 1.0, 0.85)))
 	var prompt := _make_label("Prompt", "选择武器", Vector2(0, 86), 640, 16, MAGENTA)
 	_entry.add_child(prompt)
+	_entry.add_child(_make_prompt_rule())
 	var row := HBoxContainer.new()
 	row.name = "WeaponRow"
-	row.position = Vector2(56, 122)
-	row.size = Vector2(528, 168)
+	row.position = Vector2(56, 112)
+	row.size = Vector2(528, 180)
 	row.alignment = BoxContainer.ALIGNMENT_CENTER
 	row.add_theme_constant_override("separation", 18)
 	_entry.add_child(row)
@@ -256,16 +259,28 @@ func _build_entry() -> void:
 	_entry.add_child(_make_scanlines())
 
 
-func _make_weapon_card(kind: int, weapon_label: String, flavor: String) -> VBoxContainer:
-	var card := VBoxContainer.new()
+func _make_weapon_card(kind: int, weapon_label: String, flavor: String) -> Control:
+	var card := Control.new()
 	card.name = "WeaponCard_%s" % kind
-	card.alignment = BoxContainer.ALIGNMENT_CENTER
-	card.add_theme_constant_override("separation", 6)
+	card.custom_minimum_size = Vector2(156, 176)
+	card.size = Vector2(156, 176)
+	card.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var back := TextureRect.new()
+	back.name = "CardBack"
+	back.texture = _card_back_texture(kind)
+	back.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	back.position = Vector2.ZERO
+	back.size = Vector2(156, 176)
+	back.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	back.stretch_mode = TextureRect.STRETCH_SCALE
+	back.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	card.add_child(back)
 	var icon := TextureRect.new()
 	icon.name = "Icon"
 	icon.texture = _gun_texture(kind)
 	icon.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
-	icon.custom_minimum_size = Vector2(96, 40)
+	icon.position = Vector2(22, 14)
+	icon.size = Vector2(112, 48)
 	icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 	icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -275,18 +290,31 @@ func _make_weapon_card(kind: int, weapon_label: String, flavor: String) -> VBoxC
 	button.text = weapon_label
 	button.icon = icon.texture
 	button.expand_icon = false
-	button.custom_minimum_size = Vector2(156, 52)
+	button.position = Vector2(10, 70)
+	button.size = Vector2(136, 52)
 	_paint_button(button, _weapon_accent(kind))
 	button.pressed.connect(choose_weapon.bind(kind))
 	card.add_child(button)
 	var flavor_label := Label.new()
 	flavor_label.name = "Flavor"
 	flavor_label.text = flavor
+	flavor_label.position = Vector2(8, 128)
+	flavor_label.size = Vector2(140, 16)
 	flavor_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	flavor_label.add_theme_color_override("font_color", _weapon_accent(kind))
 	flavor_label.add_theme_font_size_override("font_size", 11)
 	flavor_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	card.add_child(flavor_label)
+	var accent := TextureRect.new()
+	accent.name = "Accent"
+	accent.texture = _card_accent_texture(kind)
+	accent.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	accent.position = Vector2(28, 150)
+	accent.size = Vector2(100, 16)
+	accent.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	accent.stretch_mode = TextureRect.STRETCH_SCALE
+	accent.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	card.add_child(accent)
 	return card
 
 
@@ -308,23 +336,23 @@ func _paint_button(button: Button, accent: Color) -> void:
 	button.add_theme_color_override("font_hover_color", Color.WHITE)
 	button.add_theme_color_override("font_pressed_color", MAGENTA)
 	var style := StyleBoxFlat.new()
-	style.bg_color = Color(0.05, 0.08, 0.16, 0.96)
+	style.bg_color = Color(0.04, 0.06, 0.12, 0.92).lerp(Color(accent, 0.92), 0.22)
 	style.border_color = accent
 	style.set_border_width_all(2)
 	style.set_corner_radius_all(0)
 	style.anti_aliasing = false
-	style.shadow_color = Color(accent, 0.35)
-	style.shadow_size = 3
+	style.shadow_color = Color(accent, 0.45)
+	style.shadow_size = 4
 	style.content_margin_left = 10
 	style.content_margin_right = 10
 	style.content_margin_top = 8
 	style.content_margin_bottom = 8
 	button.add_theme_stylebox_override("normal", style)
 	var hover := style.duplicate() as StyleBoxFlat
-	hover.bg_color = Color(0.1, 0.16, 0.28, 0.98)
-	hover.border_color = MAGENTA
-	hover.shadow_color = Color(MAGENTA, 0.5)
-	hover.shadow_size = 5
+	hover.bg_color = Color(0.08, 0.12, 0.22, 0.98).lerp(Color(accent, 0.98), 0.35)
+	hover.border_color = Color.WHITE
+	hover.shadow_color = Color(accent, 0.7)
+	hover.shadow_size = 6
 	button.add_theme_stylebox_override("hover", hover)
 	button.add_theme_stylebox_override("pressed", hover)
 
@@ -361,7 +389,7 @@ func _make_scanlines() -> TextureRect:
 	view.size = Vector2(640, 360)
 	view.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	view.stretch_mode = TextureRect.STRETCH_TILE
-	view.modulate = Color(1, 1, 1, 0.28)
+	view.modulate = Color(1, 1, 1, 0.55)
 	view.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	return view
 
@@ -379,6 +407,65 @@ func _make_title_plate() -> TextureRect:
 	return plate
 
 
+func _make_status_bar() -> TextureRect:
+	var bar := TextureRect.new()
+	bar.name = "StatusBar"
+	bar.texture = _status_bar_texture()
+	bar.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	bar.position = Vector2(80, 4)
+	bar.size = Vector2(480, 16)
+	bar.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	bar.stretch_mode = TextureRect.STRETCH_SCALE
+	bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	return bar
+
+
+func _make_deck() -> TextureRect:
+	var deck := TextureRect.new()
+	deck.name = "Deck"
+	deck.texture = _deck_texture()
+	deck.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	deck.position = Vector2(0, 268)
+	deck.size = Vector2(640, 92)
+	deck.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	deck.stretch_mode = TextureRect.STRETCH_SCALE
+	deck.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	return deck
+
+
+func _make_prompt_rule() -> TextureRect:
+	var rule := TextureRect.new()
+	rule.name = "PromptRule"
+	rule.texture = _prompt_rule_texture()
+	rule.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	rule.position = Vector2(200, 104)
+	rule.size = Vector2(240, 6)
+	rule.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	rule.stretch_mode = TextureRect.STRETCH_SCALE
+	rule.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	return rule
+
+
+func _make_frame() -> TextureRect:
+	var frame := TextureRect.new()
+	frame.name = "Frame"
+	frame.texture = _frame_bezel_texture()
+	frame.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	frame.position = Vector2.ZERO
+	frame.size = Vector2(640, 360)
+	frame.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	frame.stretch_mode = TextureRect.STRETCH_SCALE
+	frame.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var inner := ColorRect.new()
+	inner.name = "InnerGlow"
+	inner.color = Color(MAGENTA, 0.06)
+	inner.position = Vector2(22, 18)
+	inner.size = Vector2(596, 324)
+	inner.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	frame.add_child(inner)
+	return frame
+
+
 func _make_rail(node_name: String, pos: Vector2, rail_size: Vector2) -> TextureRect:
 	var rail := TextureRect.new()
 	rail.name = node_name
@@ -392,68 +479,72 @@ func _make_rail(node_name: String, pos: Vector2, rail_size: Vector2) -> TextureR
 	return rail
 
 
-func _add_frame_corners(parent: Control) -> void:
-	var frame := Control.new()
-	frame.name = "Frame"
-	frame.position = Vector2.ZERO
-	frame.size = Vector2(640, 360)
-	frame.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	parent.add_child(frame)
-	var color := NEON
-	var marks := [
-		["TL_H", Vector2(16, 12), Vector2(36, 3)],
-		["TL_V", Vector2(16, 12), Vector2(3, 36)],
-		["TR_H", Vector2(588, 12), Vector2(36, 3)],
-		["TR_V", Vector2(621, 12), Vector2(3, 36)],
-		["BL_H", Vector2(16, 345), Vector2(36, 3)],
-		["BL_V", Vector2(16, 312), Vector2(3, 36)],
-		["BR_H", Vector2(588, 345), Vector2(36, 3)],
-		["BR_V", Vector2(621, 312), Vector2(3, 36)],
-	]
-	for mark in marks:
-		var rect := ColorRect.new()
-		rect.name = str(mark[0])
-		rect.color = color
-		rect.position = mark[1]
-		rect.size = mark[2]
-		rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		frame.add_child(rect)
-	var inner := ColorRect.new()
-	inner.name = "InnerGlow"
-	inner.color = Color(MAGENTA, 0.08)
-	inner.position = Vector2(22, 18)
-	inner.size = Vector2(596, 324)
-	inner.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	frame.add_child(inner)
-
-
 func _starfield_texture() -> ImageTexture:
 	const WIDTH := 160
 	const HEIGHT := 90
 	var image := Image.create(WIDTH, HEIGHT, false, Image.FORMAT_RGBA8)
-	var high := Color(0.05, 0.07, 0.14, 1)
-	var low := Color(0.02, 0.03, 0.08, 1)
-	var star := Color(0.55, 0.95, 1.0, 0.9)
-	var star_m := Color(1.0, 0.35, 0.9, 0.75)
-	var grid := Color(0.12, 0.62, 0.78, 0.38)
-	var building := Color(0.06, 0.08, 0.16, 1)
-	var window_c := Color(0.2, 0.95, 1.0, 0.85)
-	var window_m := Color(1.0, 0.28, 0.86, 0.8)
+	var high := Color(0.06, 0.04, 0.16, 1)
+	var mid := Color(0.03, 0.05, 0.12, 1)
+	var low := Color(0.01, 0.02, 0.07, 1)
+	var star := Color(0.7, 0.98, 1.0, 1)
+	var star_m := Color(1.0, 0.4, 0.92, 0.95)
+	var star_w := Color(1.0, 0.95, 0.85, 0.9)
+	var star_a := Color(1.0, 0.72, 0.28, 0.85)
+	var haze := Color(0.18, 0.08, 0.32, 1)
+	var far := Color(0.05, 0.06, 0.14, 1)
+	var building := Color(0.07, 0.09, 0.18, 1)
+	var building_d := Color(0.04, 0.05, 0.11, 1)
+	var window_c := Color(0.25, 0.98, 1.0, 1)
+	var window_m := Color(1.0, 0.32, 0.88, 1)
+	var window_a := Color(1.0, 0.7, 0.2, 0.95)
+	var grid := Color(0.14, 0.72, 0.88, 0.55)
+	var grid_m := Color(0.9, 0.2, 0.7, 0.35)
 	for y in HEIGHT:
 		var t := float(y) / float(HEIGHT)
-		var sky := high.lerp(low, t * 0.55)
+		var sky := high.lerp(mid, clampf(t * 1.4, 0.0, 1.0)) if t < 0.55 else mid.lerp(low, (t - 0.55) / 0.45)
 		for x in WIDTH:
 			image.set_pixel(x, y, sky)
-	for y in range(0, 58):
+	_stamp_circle(image, 128, 20, 16, Color(0.12, 0.05, 0.2, 1))
+	_stamp_circle(image, 128, 20, 13, Color(0.22, 0.08, 0.28, 1))
+	_stamp_circle(image, 133, 18, 9, Color(0.55, 0.18, 0.42, 1))
+	_stamp_circle(image, 136, 16, 5, Color(0.95, 0.55, 0.75, 1))
+	for x in range(108, 150):
+		var dy := int(absf(float(x - 128)) * 0.18)
+		_stamp_plot(image, x, 20 - 7 - dy, Color(NEON, 0.85))
+		_stamp_plot(image, x, 20 + 7 + dy, Color(MAGENTA, 0.7))
+	_stamp_circle(image, 42, 14, 4, Color(0.35, 0.85, 1.0, 1))
+	_stamp_plot(image, 44, 13, Color.WHITE)
+	for y in range(0, 56):
 		for x in WIDTH:
-			var hash_v := (x * 17 + y * 53) % 61
+			var hash_v := (x * 17 + y * 53) % 47
 			if hash_v == 0:
 				image.set_pixel(x, y, star)
-			elif hash_v == 7:
+			elif hash_v == 5:
 				image.set_pixel(x, y, star_m)
+			elif hash_v == 11:
+				image.set_pixel(x, y, star_w)
+			elif hash_v == 19:
+				image.set_pixel(x, y, star_a)
+	_stamp_plot(image, 24, 10, star)
+	_stamp_plot(image, 25, 10, Color(star, 0.4))
+	_stamp_plot(image, 23, 10, Color(star, 0.4))
+	_stamp_plot(image, 24, 9, Color(star, 0.4))
+	_stamp_plot(image, 24, 11, Color(star, 0.4))
+	for x in range(18, 70):
+		var hy := 58 + int((x - 18) * 0.04)
+		_stamp_plot(image, x, hy, haze)
+	var far_h := [8, 5, 11, 4, 9, 6, 10, 7]
+	var fx := 8
+	for i in far_h.size():
+		var fh: int = far_h[i]
+		for y in range(58 - fh, 58):
+			for x in range(fx, mini(fx + 6, WIDTH)):
+				image.set_pixel(x, y, far)
+		fx += 7
 	for x in WIDTH:
+		image.set_pixel(x, 61, Color(NEON, 0.55))
 		image.set_pixel(x, 62, NEON)
-		image.set_pixel(x, 63, Color(NEON, 0.4))
+		image.set_pixel(x, 63, Color(MAGENTA, 0.45))
 	var heights := [18, 12, 22, 8, 16, 10, 20, 14, 9, 17, 11, 19, 7, 15]
 	var bx := 0
 	for i in heights.size():
@@ -461,25 +552,49 @@ func _starfield_texture() -> ImageTexture:
 		var bw := 10 + (i % 3) * 2
 		for y in range(63 - bh, 63):
 			for x in range(bx, mini(bx + bw, WIDTH)):
-				var lit := (x + y) % 5 == 0 and y > 63 - bh + 2
+				var edge := x == bx or x == bx + bw - 1
+				var lit := (x + y + i) % 4 == 0 and y > 63 - bh + 2
 				if lit:
-					image.set_pixel(x, y, window_c if (x + i) % 2 == 0 else window_m)
+					var win := window_c if (x + i) % 3 == 0 else (window_m if (y + i) % 2 == 0 else window_a)
+					image.set_pixel(x, y, win)
+				elif edge:
+					image.set_pixel(x, y, building_d)
 				else:
 					image.set_pixel(x, y, building)
 		bx += bw + 1
 	for y in range(64, HEIGHT):
 		for x in WIDTH:
-			if y % 4 == 0 or (x + int(y / 2)) % 12 == 0:
+			if y % 5 == 0:
 				image.set_pixel(x, y, grid)
+			elif (x + int(y / 2)) % 10 == 0:
+				image.set_pixel(x, y, grid_m)
+	_stamp_plot(image, 6, 6, NEON)
+	_stamp_plot(image, 7, 6, NEON)
+	_stamp_plot(image, 6, 7, Color(NEON, 0.6))
+	_stamp_plot(image, 153, 8, MAGENTA)
+	_stamp_plot(image, 154, 8, MAGENTA)
+	_stamp_plot(image, 154, 9, Color(MAGENTA, 0.6))
 	return ImageTexture.create_from_image(image)
 
 
 func _scanline_texture() -> ImageTexture:
-	var image := Image.create(2, 2, false, Image.FORMAT_RGBA8)
-	image.set_pixel(0, 0, Color(0, 0, 0, 0.45))
-	image.set_pixel(1, 0, Color(0, 0, 0, 0.45))
-	image.set_pixel(0, 1, Color(0, 0, 0, 0))
-	image.set_pixel(1, 1, Color(0, 0, 0, 0))
+	var image := Image.create(4, 8, false, Image.FORMAT_RGBA8)
+	var rows := [
+		Color(0.1, 0.85, 1.0, 0.16),
+		Color(0, 0, 0, 0.42),
+		Color(0, 0, 0, 0),
+		Color(1.0, 0.22, 0.86, 0.1),
+		Color(0, 0, 0, 0.28),
+		Color(0.2, 0.95, 1.0, 0.08),
+		Color(0, 0, 0, 0),
+		Color(0, 0, 0, 0.18),
+	]
+	for y in rows.size():
+		for x in 4:
+			image.set_pixel(x, y, rows[y])
+	image.set_pixel(1, 0, Color(0.12, 0.95, 1.0, 0.7))
+	image.set_pixel(2, 3, Color(1.0, 0.22, 0.86, 0.65))
+	image.set_pixel(0, 5, Color(1.0, 0.7, 0.22, 0.55))
 	return ImageTexture.create_from_image(image)
 
 
@@ -487,78 +602,257 @@ func _title_plate_texture() -> ImageTexture:
 	const WIDTH := 100
 	const HEIGHT := 14
 	var image := Image.create(WIDTH, HEIGHT, false, Image.FORMAT_RGBA8)
-	var plate := Color(0.04, 0.08, 0.16, 0.88)
+	var plate := Color(0.03, 0.07, 0.14, 0.9)
+	var plate_hi := Color(0.08, 0.16, 0.28, 0.92)
 	var rim := NEON
 	var dash := MAGENTA
+	var amber := Color(1.0, 0.7, 0.22, 1)
 	for y in HEIGHT:
 		for x in WIDTH:
-			image.set_pixel(x, y, plate)
+			image.set_pixel(x, y, plate if y > 3 and y < HEIGHT - 4 else plate_hi)
 	for x in WIDTH:
 		image.set_pixel(x, 0, rim)
 		image.set_pixel(x, HEIGHT - 1, rim)
 	for y in HEIGHT:
 		image.set_pixel(0, y, rim)
 		image.set_pixel(WIDTH - 1, y, rim)
-	for x in range(4, WIDTH - 4, 4):
-		image.set_pixel(x, 2, dash)
-		image.set_pixel(x, HEIGHT - 3, dash)
+	_stamp_plot(image, 2, 2, amber)
+	_stamp_plot(image, 3, 2, amber)
+	_stamp_plot(image, 2, 3, amber)
+	_stamp_plot(image, WIDTH - 3, 2, amber)
+	_stamp_plot(image, WIDTH - 4, 2, amber)
+	_stamp_plot(image, WIDTH - 3, 3, amber)
+	_stamp_plot(image, 2, HEIGHT - 3, dash)
+	_stamp_plot(image, WIDTH - 3, HEIGHT - 3, dash)
+	for x in range(6, WIDTH - 6, 3):
+		image.set_pixel(x, 2, dash if x % 6 == 0 else rim)
+		image.set_pixel(x, HEIGHT - 3, rim if x % 6 == 0 else dash)
+	image.set_pixel(49, 6, Color.WHITE)
+	image.set_pixel(50, 6, amber)
+	image.set_pixel(48, 6, amber)
+	return ImageTexture.create_from_image(image)
+
+
+func _status_bar_texture() -> ImageTexture:
+	const WIDTH := 120
+	const HEIGHT := 4
+	var image := Image.create(WIDTH, HEIGHT, false, Image.FORMAT_RGBA8)
+	var void_c := Color(0.03, 0.05, 0.1, 0.85)
+	for y in HEIGHT:
+		for x in WIDTH:
+			image.set_pixel(x, y, void_c)
+	for x in WIDTH:
+		image.set_pixel(x, 0, NEON)
+		image.set_pixel(x, HEIGHT - 1, Color(MAGENTA, 0.7))
+	for x in range(4, WIDTH - 4, 8):
+		_stamp_rect(image, x, 1, x + 5, 3, Color(0.2, 0.95, 1.0, 0.85) if (x / 8) % 2 == 0 else Color(1.0, 0.35, 0.88, 0.85))
+	image.set_pixel(2, 1, Color(1.0, 0.7, 0.2, 1))
+	image.set_pixel(WIDTH - 3, 1, Color(1.0, 0.7, 0.2, 1))
+	return ImageTexture.create_from_image(image)
+
+
+func _deck_texture() -> ImageTexture:
+	const WIDTH := 160
+	const HEIGHT := 23
+	var image := Image.create(WIDTH, HEIGHT, false, Image.FORMAT_RGBA8)
+	var floor_c := Color(0.04, 0.06, 0.12, 0.55)
+	var glow := Color(0.12, 0.9, 1.0, 0.35)
+	var glow_m := Color(1.0, 0.22, 0.86, 0.28)
+	var line := Color(0.2, 0.95, 1.0, 0.7)
+	var line_m := Color(1.0, 0.4, 0.9, 0.45)
+	for y in HEIGHT:
+		for x in WIDTH:
+			image.set_pixel(x, y, Color(floor_c, 0.15 + float(y) / float(HEIGHT) * 0.4))
+	for x in WIDTH:
+		image.set_pixel(x, 0, glow)
+		image.set_pixel(x, 1, glow_m)
+	for y in range(2, HEIGHT):
+		for x in WIDTH:
+			if y % 4 == 0:
+				image.set_pixel(x, y, line)
+			elif absi(x - 80) % maxi(6, 14 - y) == 0:
+				image.set_pixel(x, y, line_m)
+	return ImageTexture.create_from_image(image)
+
+
+func _prompt_rule_texture() -> ImageTexture:
+	var image := Image.create(60, 2, false, Image.FORMAT_RGBA8)
+	for x in 60:
+		image.set_pixel(x, 0, MAGENTA if x % 4 < 2 else NEON)
+		image.set_pixel(x, 1, Color(NEON, 0.45))
+	image.set_pixel(0, 0, Color.WHITE)
+	image.set_pixel(59, 0, Color(1.0, 0.7, 0.2, 1))
+	return ImageTexture.create_from_image(image)
+
+
+func _frame_bezel_texture() -> ImageTexture:
+	const WIDTH := 160
+	const HEIGHT := 90
+	var image := Image.create(WIDTH, HEIGHT, false, Image.FORMAT_RGBA8)
+	var rim := NEON
+	var rim_m := MAGENTA
+	var amber := Color(1.0, 0.68, 0.2, 1)
+	var tick := Color(0.3, 0.95, 1.0, 0.85)
+	_stamp_rect(image, 4, 3, 16, 5, rim)
+	_stamp_rect(image, 4, 3, 6, 15, rim)
+	_stamp_rect(image, 144, 3, 156, 5, rim)
+	_stamp_rect(image, 154, 3, 156, 15, rim)
+	_stamp_rect(image, 4, 85, 16, 87, rim)
+	_stamp_rect(image, 4, 75, 6, 87, rim)
+	_stamp_rect(image, 144, 85, 156, 87, rim)
+	_stamp_rect(image, 154, 75, 156, 87, rim)
+	_stamp_plot(image, 4, 3, amber)
+	_stamp_plot(image, 155, 3, amber)
+	_stamp_plot(image, 4, 86, amber)
+	_stamp_plot(image, 155, 86, amber)
+	_stamp_plot(image, 5, 4, rim_m)
+	_stamp_plot(image, 154, 4, rim_m)
+	_stamp_plot(image, 5, 85, rim_m)
+	_stamp_plot(image, 154, 85, rim_m)
+	for x in range(20, 140, 6):
+		_stamp_plot(image, x, 3, tick)
+		_stamp_plot(image, x, 86, tick if x % 12 == 0 else rim_m)
+	for y in range(16, 74, 8):
+		_stamp_plot(image, 4, y, tick)
+		_stamp_plot(image, 155, y, rim_m if y % 16 == 0 else tick)
+	for x in range(8, 152, 4):
+		_stamp_plot(image, x, 6, Color(rim_m, 0.55))
+		_stamp_plot(image, x, 83, Color(rim, 0.45))
 	return ImageTexture.create_from_image(image)
 
 
 func _rail_texture(width: int, height: int) -> ImageTexture:
 	var image := Image.create(maxi(width, 2), maxi(height, 8), false, Image.FORMAT_RGBA8)
 	var core := NEON
-	var dim := Color(0.08, 0.4, 0.5, 0.7)
+	var dim := Color(0.08, 0.38, 0.48, 0.75)
 	var pulse := MAGENTA
+	var amber := Color(1.0, 0.7, 0.22, 0.9)
+	var w := image.get_width()
 	for y in image.get_height():
-		for x in image.get_width():
-			if x == 0 or x == image.get_width() - 1:
+		for x in w:
+			if x == 0 or x == w - 1:
 				image.set_pixel(x, y, core)
-			elif y % 10 == 0:
+			elif y % 16 == 0:
 				image.set_pixel(x, y, pulse)
+			elif y % 16 == 8:
+				image.set_pixel(x, y, amber)
+			elif (y + x) % 7 == 0:
+				image.set_pixel(x, y, Color(core, 0.55))
 			else:
 				image.set_pixel(x, y, dim)
+		if y % 20 == 4 and w >= 4:
+			image.set_pixel(1, y, Color.WHITE)
+			image.set_pixel(2, y, pulse)
+	return ImageTexture.create_from_image(image)
+
+
+func _card_back_texture(kind: int) -> ImageTexture:
+	const WIDTH := 39
+	const HEIGHT := 44
+	var image := Image.create(WIDTH, HEIGHT, false, Image.FORMAT_RGBA8)
+	var accent := _weapon_accent(kind)
+	var void_c := Color(0.03, 0.05, 0.1, 0.94)
+	var hi := Color(0.07, 0.1, 0.18, 0.96).lerp(Color(accent, 0.96), 0.2)
+	for y in HEIGHT:
+		for x in WIDTH:
+			var on_grid := (x + y) % 6 == 0
+			image.set_pixel(x, y, Color(accent, 0.12) if on_grid else (hi if y < 6 else void_c))
+	for x in WIDTH:
+		image.set_pixel(x, 0, accent)
+		image.set_pixel(x, HEIGHT - 1, accent)
+	for y in HEIGHT:
+		image.set_pixel(0, y, accent)
+		image.set_pixel(WIDTH - 1, y, accent)
+	_stamp_rect(image, 1, 1, 5, 2, Color.WHITE)
+	_stamp_rect(image, 1, 1, 2, 5, Color.WHITE)
+	_stamp_rect(image, WIDTH - 5, 1, WIDTH - 1, 2, Color(1.0, 0.7, 0.22, 1))
+	_stamp_rect(image, WIDTH - 2, 1, WIDTH - 1, 5, Color(1.0, 0.7, 0.22, 1))
+	_stamp_rect(image, 1, HEIGHT - 2, 5, HEIGHT - 1, MAGENTA)
+	_stamp_rect(image, WIDTH - 5, HEIGHT - 2, WIDTH - 1, HEIGHT - 1, MAGENTA)
+	for x in range(4, WIDTH - 4, 3):
+		image.set_pixel(x, 3, Color(accent, 0.8))
+	return ImageTexture.create_from_image(image)
+
+
+func _card_accent_texture(kind: int) -> ImageTexture:
+	var image := Image.create(25, 4, false, Image.FORMAT_RGBA8)
+	var accent := _weapon_accent(kind)
+	var lit := mini(kind + 2, 3)
+	for x in 25:
+		for y in 4:
+			image.set_pixel(x, y, Color(0.05, 0.07, 0.12, 0.9))
+	for i in 3:
+		var x0 := 2 + i * 8
+		var fill := accent if i < lit else Color(0.18, 0.2, 0.28, 0.9)
+		_stamp_rect(image, x0, 1, x0 + 6, 3, fill)
+	image.set_pixel(0, 1, Color.WHITE)
+	image.set_pixel(24, 1, MAGENTA)
 	return ImageTexture.create_from_image(image)
 
 
 func _gun_texture(kind: int) -> ImageTexture:
-	var image := Image.create(32, 16, false, Image.FORMAT_RGBA8)
-	var hull := Color(0.16, 0.2, 0.34, 1)
+	var image := Image.create(48, 24, false, Image.FORMAT_RGBA8)
+	var hull := Color(0.18, 0.22, 0.36, 1)
+	var hull_d := Color(0.1, 0.12, 0.22, 1)
 	var neon := _weapon_accent(kind)
-	var glow := neon.lightened(0.25)
+	var glow := neon.lightened(0.28)
 	match kind:
 		WEAPON_SHOTGUN:
-			_stamp_rect(image, 4, 6, 8, 10, hull)
-			_stamp_rect(image, 8, 5, 22, 8, neon)
-			_stamp_rect(image, 8, 9, 20, 12, neon)
-			_stamp_rect(image, 10, 12, 14, 15, hull)
-			_stamp_rect(image, 22, 6, 26, 11, glow)
-			image.set_pixel(27, 7, glow)
-			image.set_pixel(27, 10, glow)
+			_stamp_rect(image, 4, 9, 12, 16, hull)
+			_stamp_rect(image, 8, 6, 34, 10, neon)
+			_stamp_rect(image, 8, 12, 32, 16, neon)
+			_stamp_rect(image, 12, 16, 20, 22, hull_d)
+			_stamp_rect(image, 14, 10, 22, 13, hull)
+			_stamp_rect(image, 34, 7, 40, 15, glow)
+			_stamp_plot(image, 41, 8, Color.WHITE)
+			_stamp_plot(image, 41, 13, Color.WHITE)
+			_stamp_plot(image, 42, 8, glow)
+			_stamp_plot(image, 42, 13, glow)
+			_stamp_plot(image, 18, 8, Color(1.0, 0.85, 0.35, 1))
 		WEAPON_LASER:
-			_stamp_rect(image, 3, 7, 8, 11, hull)
-			_stamp_rect(image, 8, 8, 28, 9, neon)
-			_stamp_rect(image, 12, 7, 26, 8, glow)
-			_stamp_rect(image, 12, 9, 26, 10, glow)
-			_stamp_rect(image, 9, 10, 13, 14, hull)
-			image.set_pixel(29, 8, Color.WHITE)
-			image.set_pixel(30, 8, glow)
+			_stamp_rect(image, 5, 10, 13, 16, hull)
+			_stamp_rect(image, 12, 11, 42, 13, neon)
+			_stamp_rect(image, 16, 9, 38, 11, glow)
+			_stamp_rect(image, 16, 13, 38, 15, glow)
+			_stamp_rect(image, 13, 15, 19, 21, hull_d)
+			_stamp_rect(image, 20, 8, 24, 16, MAGENTA)
+			_stamp_plot(image, 43, 12, Color.WHITE)
+			_stamp_plot(image, 44, 12, glow)
+			_stamp_plot(image, 45, 12, Color.WHITE)
+			_stamp_plot(image, 28, 10, Color(1.0, 0.7, 1.0, 1))
 		_:
-			_stamp_rect(image, 2, 7, 8, 11, hull)
-			_stamp_rect(image, 8, 6, 26, 9, neon)
-			_stamp_rect(image, 10, 9, 16, 12, hull)
-			_stamp_rect(image, 12, 11, 15, 15, hull)
-			_stamp_rect(image, 16, 9, 19, 13, MAGENTA)
-			_stamp_rect(image, 26, 6, 30, 9, glow)
-			image.set_pixel(31, 7, Color.WHITE)
+			_stamp_rect(image, 3, 10, 12, 16, hull)
+			_stamp_rect(image, 11, 8, 40, 12, neon)
+			_stamp_rect(image, 14, 12, 24, 16, hull)
+			_stamp_rect(image, 16, 16, 22, 22, hull_d)
+			_stamp_rect(image, 24, 12, 28, 18, MAGENTA)
+			_stamp_rect(image, 40, 8, 45, 12, glow)
+			_stamp_plot(image, 46, 9, Color.WHITE)
+			_stamp_plot(image, 47, 10, glow)
+			_stamp_plot(image, 20, 9, Color(0.4, 1.0, 1.0, 1))
+			_stamp_plot(image, 32, 10, Color.WHITE)
 	return ImageTexture.create_from_image(image)
 
 
 func _stamp_rect(image: Image, x0: int, y0: int, x1: int, y1: int, color: Color) -> void:
 	for y in range(y0, y1):
 		for x in range(x0, x1):
-			if x >= 0 and y >= 0 and x < image.get_width() and y < image.get_height():
-				image.set_pixel(x, y, color)
+			_stamp_plot(image, x, y, color)
+
+
+func _stamp_plot(image: Image, x: int, y: int, color: Color) -> void:
+	if x >= 0 and y >= 0 and x < image.get_width() and y < image.get_height():
+		image.set_pixel(x, y, color)
+
+
+func _stamp_circle(image: Image, cx: int, cy: int, radius: int, color: Color) -> void:
+	var r2 := radius * radius
+	for y in range(cy - radius, cy + radius + 1):
+		for x in range(cx - radius, cx + radius + 1):
+			var dx := x - cx
+			var dy := y - cy
+			if dx * dx + dy * dy <= r2:
+				_stamp_plot(image, x, y, color)
 
 
 func _rebuild_stage() -> void:

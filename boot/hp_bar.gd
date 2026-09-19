@@ -19,6 +19,9 @@ var _track: ColorRect
 var _fill: ColorRect
 var _edge: ColorRect
 var _glow: ColorRect
+var _hatch: TextureRect
+var _track_grid: TextureRect
+var _scan: TextureRect
 var _caption: Label
 var _readout: Label
 var _pips: Control
@@ -29,13 +32,17 @@ func _init() -> void:
 	custom_minimum_size = HUD_SIZE
 	size = HUD_SIZE
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_glow = _swatch("Glow", Color(NEON_FILL, 0.22), BAR_POS + Vector2(-3, -3), BAR_SIZE + Vector2(6, 6))
+	_glow = _swatch("Glow", Color(NEON_FILL, 0.28), BAR_POS + Vector2(-3, -3), BAR_SIZE + Vector2(6, 6))
 	_edge = _swatch("Edge", NEON_EDGE, BAR_POS + Vector2(-1, -1), BAR_SIZE + Vector2(2, 2))
 	_track = _swatch("Track", VOID_TRACK, BAR_POS, BAR_SIZE)
+	_track_grid = _pixel_layer("TrackGrid", _track_grid_texture(), BAR_POS, BAR_SIZE)
 	_fill = _swatch("Fill", NEON_FILL, BAR_POS, BAR_SIZE)
+	_hatch = _pixel_layer("Hatch", _hatch_texture(), BAR_POS, BAR_SIZE)
+	_scan = _pixel_layer("Scan", _scan_texture(), BAR_POS + Vector2(-2, -2), BAR_SIZE + Vector2(4, 4))
 	_add_frame()
 	_add_ticks()
 	_add_brackets()
+	_add_life_mark()
 	_caption = _hud_label("Caption", "HP", Vector2(2, 5), 20, NEON_EDGE)
 	_readout = _hud_label("Readout", "5/5", Vector2(188, 5), 40, NEON_FILL)
 	_pips = Control.new()
@@ -63,6 +70,8 @@ func _layout_fill() -> void:
 	if _fill == null:
 		return
 	_fill.size = Vector2(BAR_SIZE.x * get_ratio(), BAR_SIZE.y)
+	if _hatch != null:
+		_hatch.size = Vector2(BAR_SIZE.x * get_ratio(), BAR_SIZE.y)
 	if _glow != null:
 		_glow.size = Vector2(6.0 + BAR_SIZE.x * get_ratio(), _glow.size.y)
 	if _readout != null:
@@ -150,9 +159,11 @@ func _frame_texture() -> ImageTexture:
 	var image := Image.create(width, height, false, Image.FORMAT_RGBA8)
 	var rim := Color(0.18, 0.98, 1.0, 0.95)
 	var corner := Color(1.0, 0.28, 0.9, 1.0)
+	var amber := Color(1.0, 0.7, 0.22, 1)
+	var tick := Color(0.55, 1.0, 1.0, 0.9)
 	for x in width:
 		image.set_pixel(x, 0, rim)
-		image.set_pixel(x, height - 1, rim)
+		image.set_pixel(x, height - 1, rim if x % 3 != 0 else corner)
 	for y in height:
 		image.set_pixel(0, y, rim)
 		image.set_pixel(width - 1, y, rim)
@@ -162,7 +173,100 @@ func _frame_texture() -> ImageTexture:
 			image.set_pixel(width - 1 - x, y, corner)
 			image.set_pixel(x, height - 1 - y, corner)
 			image.set_pixel(width - 1 - x, height - 1 - y, corner)
+	image.set_pixel(0, 0, amber)
+	image.set_pixel(width - 1, 0, amber)
+	image.set_pixel(0, height - 1, amber)
+	image.set_pixel(width - 1, height - 1, amber)
+	for x in range(8, width - 8, 8):
+		image.set_pixel(x, 1, tick)
+		image.set_pixel(x, height - 2, Color(corner, 0.8))
 	return ImageTexture.create_from_image(image)
+
+
+func _track_grid_texture() -> ImageTexture:
+	var image := Image.create(32, 10, false, Image.FORMAT_RGBA8)
+	for y in 10:
+		for x in 32:
+			var c := Color(0.08, 0.16, 0.28, 0.55)
+			if x % 8 == 0:
+				c = Color(0.2, 0.85, 1.0, 0.45)
+			elif y == 0 or y == 9:
+				c = Color(1.0, 0.28, 0.86, 0.25)
+			image.set_pixel(x, y, c)
+	return ImageTexture.create_from_image(image)
+
+
+func _hatch_texture() -> ImageTexture:
+	var image := Image.create(16, 10, false, Image.FORMAT_RGBA8)
+	for y in 10:
+		for x in 16:
+			if (x + y) % 4 == 0:
+				image.set_pixel(x, y, Color(1.0, 0.75, 0.95, 0.55))
+			elif (x + y) % 4 == 2:
+				image.set_pixel(x, y, Color(0.4, 1.0, 1.0, 0.35))
+			else:
+				image.set_pixel(x, y, Color(1.0, 0.22, 0.86, 0.12))
+	image.set_pixel(0, 0, Color(1.0, 0.22, 0.86, 0.9))
+	image.set_pixel(1, 0, Color(0.12, 0.95, 1.0, 0.9))
+	return ImageTexture.create_from_image(image)
+
+
+func _scan_texture() -> ImageTexture:
+	var image := Image.create(8, 4, false, Image.FORMAT_RGBA8)
+	for y in 4:
+		for x in 8:
+			if y == 1:
+				image.set_pixel(x, y, Color(0.2, 0.95, 1.0, 0.22))
+			elif y == 3:
+				image.set_pixel(x, y, Color(1.0, 0.22, 0.86, 0.12))
+			else:
+				image.set_pixel(x, y, Color(0, 0, 0, 0))
+	image.set_pixel(2, 1, Color(1.0, 1.0, 1.0, 0.3))
+	return ImageTexture.create_from_image(image)
+
+
+func _add_life_mark() -> void:
+	var mark := TextureRect.new()
+	mark.name = "LifeMark"
+	mark.texture = _life_mark_texture()
+	mark.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	mark.position = Vector2(188, 16)
+	mark.size = Vector2(40, 8)
+	mark.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	mark.stretch_mode = TextureRect.STRETCH_SCALE
+	mark.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(mark)
+
+
+func _life_mark_texture() -> ImageTexture:
+	var image := Image.create(20, 4, false, Image.FORMAT_RGBA8)
+	for y in 4:
+		for x in 20:
+			image.set_pixel(x, y, Color(0.04, 0.06, 0.1, 0.85))
+	for x in range(1, 19, 4):
+		var lit := x < 13
+		var c := Color(1.0, 0.22, 0.86, 1) if lit else Color(0.2, 0.12, 0.24, 0.9)
+		image.set_pixel(x, 1, c)
+		image.set_pixel(x + 1, 1, c)
+		image.set_pixel(x, 2, c)
+		image.set_pixel(x + 1, 2, c)
+	image.set_pixel(0, 0, Color(0.12, 0.95, 1.0, 1))
+	image.set_pixel(19, 0, Color(1.0, 0.7, 0.22, 1))
+	return ImageTexture.create_from_image(image)
+
+
+func _pixel_layer(node_name: String, texture: Texture2D, pos: Vector2, rect_size: Vector2) -> TextureRect:
+	var view := TextureRect.new()
+	view.name = node_name
+	view.texture = texture
+	view.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	view.position = pos
+	view.size = rect_size
+	view.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	view.stretch_mode = TextureRect.STRETCH_TILE
+	view.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(view)
+	return view
 
 
 func _swatch(node_name: String, color: Color, pos: Vector2, rect_size: Vector2) -> ColorRect:

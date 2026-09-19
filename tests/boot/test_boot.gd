@@ -244,19 +244,26 @@ func _boot_surfaces_are_not_plain(failures: PackedStringArray) -> void:
 		var sky := starfield.texture.get_image()
 		_check(failures, sky != null, "starfield texture must expose pixels")
 		if sky != null:
-			_check(failures, _unique_opaque_colors(sky) >= 6, "entry backdrop must not be a single flat color")
+			_check(failures, _unique_opaque_colors(sky) >= 10, "entry backdrop must not be a single flat color")
 			_check(failures, _image_has_neon(sky), "entry backdrop must include neon sci-fi color")
-	_check(failures, entry.get_node_or_null("Scanlines") is TextureRect, "entry needs CRT scanlines")
-	_check(failures, entry.get_node_or_null("Frame") != null, "entry needs a neon frame")
-	_check(failures, entry.get_node_or_null("RailLeft") != null and entry.get_node_or_null("RailRight") != null, "entry needs side rails")
-	_check(failures, entry.get_node_or_null("TitlePlate") is TextureRect, "title needs a pixel plate")
+			_check(failures, _image_has_warm_accent(sky), "entry backdrop needs a second accent besides cyan")
+	_assert_pixel_layer(failures, entry, "Scanlines", 3, true, "entry scanlines")
+	_assert_pixel_layer(failures, entry, "Frame", 4, true, "entry frame")
+	_assert_pixel_layer(failures, entry, "RailLeft", 3, true, "entry left rail")
+	_assert_pixel_layer(failures, entry, "RailRight", 3, true, "entry right rail")
+	_assert_pixel_layer(failures, entry, "TitlePlate", 4, true, "title plate")
+	_assert_pixel_layer(failures, entry, "Deck", 3, true, "entry deck")
+	_assert_pixel_layer(failures, entry, "StatusBar", 3, true, "entry status bar")
 	_check(failures, _find_label_text(boot, "像素科幻 · 三关突击"), "entry must show a sci-fi tag under the title")
 	_check(failures, _find_label_text(boot, "点选武器进入平地练手"), "entry must hint how to start")
+	var gun_images: Array[Image] = []
 	for pair in [["0", "直射"], ["1", "近距散射"], ["2", "能量直线"]]:
 		var card := entry.get_node_or_null("WeaponRow/WeaponCard_%s" % pair[0]) if entry != null else null
 		_check(failures, card != null, "weapon card %s missing" % pair[0])
 		if card == null:
 			continue
+		_assert_pixel_layer(failures, card, "CardBack", 4, true, "weapon card %s back" % pair[0])
+		_assert_pixel_layer(failures, card, "Accent", 3, true, "weapon card %s accent" % pair[0])
 		var icon := card.get_node_or_null("Icon") as TextureRect
 		_check(failures, icon != null and icon.texture != null, "weapon card %s needs a pixel gun icon" % pair[0])
 		if icon != null and icon.texture != null:
@@ -267,10 +274,16 @@ func _boot_surfaces_are_not_plain(failures: PackedStringArray) -> void:
 			)
 			var gun := icon.texture.get_image()
 			_check(failures, gun != null and _image_has_neon(gun), "weapon icon %s must be neon sci-fi" % pair[0])
+			if gun != null:
+				gun_images.append(gun)
 		var button := card.get_node_or_null("Weapon_%s" % pair[0]) as Button
 		_check(failures, button != null and button.icon != null, "weapon button %s needs an icon, not plain text" % pair[0])
 		var flavor := card.get_node_or_null("Flavor") as Label
 		_check(failures, flavor != null and flavor.text == pair[1], "weapon card %s flavor must be %s" % [pair[0], pair[1]])
+	if gun_images.size() == 3:
+		_check(failures, _images_differ(gun_images[0], gun_images[1]), "步枪 and 散弹枪 icons must not share one silhouette")
+		_check(failures, _images_differ(gun_images[0], gun_images[2]), "步枪 and 激光枪 icons must not share one silhouette")
+		_check(failures, _images_differ(gun_images[1], gun_images[2]), "散弹枪 and 激光枪 icons must not share one silhouette")
 	boot.free()
 
 	var bar: Control = HpBarScript.new()
@@ -280,10 +293,15 @@ func _boot_surfaces_are_not_plain(failures: PackedStringArray) -> void:
 	_check(failures, bar.get_node_or_null("Ticks") != null, "hp bar needs segment ticks")
 	_check(failures, bar.get_node_or_null("Pips") != null, "hp bar needs energy pips")
 	_check(failures, bar.get_node_or_null("Glow") != null, "hp bar needs a neon glow")
-	_check(failures, bar.get_child_count() >= 10, "hp bar chrome must be more than a plain rectangle")
+	_assert_pixel_layer(failures, bar, "Hatch", 3, true, "hp hatch")
+	_assert_pixel_layer(failures, bar, "TrackGrid", 2, false, "hp track grid")
+	_assert_pixel_layer(failures, bar, "LifeMark", 3, true, "hp life mark")
+	_check(failures, bar.get_child_count() >= 12, "hp bar chrome must be more than a plain rectangle")
 	bar.call("set_hp", 2, 5)
 	var readout := bar.get_node_or_null("Readout") as Label
 	_check(failures, readout != null and readout.text == "2/5", "hp readout must track 2/5, got %s" % (readout.text if readout != null else ""))
+	var hatch := bar.get_node_or_null("Hatch") as TextureRect
+	_check(failures, hatch != null and is_equal_approx(hatch.size.x, 160.0 * 0.4), "hp hatch width must follow 2/5")
 	var pips := bar.get_node_or_null("Pips")
 	_check(failures, pips != null and pips.get_child_count() == 5, "hp pips must match max hp")
 	if pips != null and pips.get_child_count() >= 5:
@@ -294,6 +312,9 @@ func _boot_surfaces_are_not_plain(failures: PackedStringArray) -> void:
 		_check(failures, frame.texture_filter == CanvasItem.TEXTURE_FILTER_NEAREST, "hp frame must be nearest-neighbor pixels")
 		var chrome := frame.texture.get_image()
 		_check(failures, chrome != null and _image_has_neon(chrome), "hp frame must include neon sci-fi color")
+		if chrome != null:
+			_check(failures, _unique_opaque_colors(chrome) >= 3, "hp frame must not be a single rim color")
+			_check(failures, _image_has_warm_accent(chrome), "hp frame needs a second accent besides cyan")
 	bar.free()
 
 
@@ -387,6 +408,39 @@ func _find_stage_part(node: Node, part: String) -> Node:
 	return null
 
 
+func _assert_pixel_layer(
+	failures: PackedStringArray,
+	parent: Node,
+	node_name: String,
+	min_colors: int,
+	need_neon: bool,
+	label: String
+) -> void:
+	_check(failures, parent != null, "%s parent missing" % label)
+	if parent == null:
+		return
+	var view := parent.get_node_or_null(node_name) as TextureRect
+	_check(failures, view != null and view.texture != null, "%s needs a pixel texture, not a flat node" % label)
+	if view == null or view.texture == null:
+		return
+	_check(
+		failures,
+		view.texture_filter == CanvasItem.TEXTURE_FILTER_NEAREST,
+		"%s must stay nearest-neighbor pixels" % label
+	)
+	var image := view.texture.get_image()
+	_check(failures, image != null, "%s texture must expose pixels" % label)
+	if image == null:
+		return
+	_check(
+		failures,
+		_unique_visible_colors(image) >= min_colors,
+		"%s must use several pixel colors, got %s" % [label, _unique_visible_colors(image)]
+	)
+	if need_neon:
+		_check(failures, _image_has_neon(image), "%s must include neon sci-fi color" % label)
+
+
 func _image_has_neon(image: Image) -> bool:
 	for y in image.get_height():
 		for x in image.get_width():
@@ -394,6 +448,38 @@ func _image_has_neon(image: Image) -> bool:
 			if color.a >= 0.5 and color.s >= 0.45 and color.v >= 0.7:
 				return true
 	return false
+
+
+func _image_has_warm_accent(image: Image) -> bool:
+	for y in image.get_height():
+		for x in image.get_width():
+			var color := image.get_pixel(x, y)
+			if color.a < 0.5 or color.s < 0.4 or color.v < 0.55:
+				continue
+			if color.r > color.b + 0.08:
+				return true
+	return false
+
+
+func _images_differ(a: Image, b: Image) -> bool:
+	if a.get_width() != b.get_width() or a.get_height() != b.get_height():
+		return true
+	for y in a.get_height():
+		for x in a.get_width():
+			if a.get_pixel(x, y) != b.get_pixel(x, y):
+				return true
+	return false
+
+
+func _unique_visible_colors(image: Image) -> int:
+	var seen := {}
+	for y in image.get_height():
+		for x in image.get_width():
+			var color := image.get_pixel(x, y)
+			if color.a < 0.12:
+				continue
+			seen[color] = true
+	return seen.size()
 
 
 func _unique_opaque_colors(image: Image) -> int:

@@ -6,6 +6,10 @@ config_version=5
 config/name="突击三关"
 config/features=PackedStringArray("4.7")
 
+[autoload]
+
+Boot="*res://boot/boot.gd"
+
 [display]
 
 window/size/viewport_width=640

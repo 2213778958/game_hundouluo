@@ -16,6 +16,7 @@ func run() -> PackedStringArray:
 	_nodes_stay_off_tree_and_2d(failures)
 	_boot_does_not_compile_depend_on_stages(failures)
 	_weapon_opens_visible_flat_training(failures)
+	_boot_surfaces_are_not_plain(failures)
 	return failures
 
 
@@ -226,6 +227,76 @@ func _boot_does_not_compile_depend_on_stages(failures: PackedStringArray) -> voi
 	_check(failures, "func hang_stages" in src, "boot must expose hang_stages for the autoload path")
 
 
+func _boot_surfaces_are_not_plain(failures: PackedStringArray) -> void:
+	var boot := _make_boot()
+	var entry := boot.get_node_or_null("Entry")
+	_check(failures, entry != null, "entry surface must exist")
+	var starfield: TextureRect = null
+	if entry != null:
+		starfield = entry.get_node_or_null("Starfield") as TextureRect
+	_check(failures, starfield != null and starfield.texture != null, "entry needs a pixel starfield, not a flat void")
+	if starfield != null:
+		_check(
+			failures,
+			starfield.texture_filter == CanvasItem.TEXTURE_FILTER_NEAREST,
+			"entry starfield must stay nearest-neighbor pixels"
+		)
+		var sky := starfield.texture.get_image()
+		_check(failures, sky != null, "starfield texture must expose pixels")
+		if sky != null:
+			_check(failures, _unique_opaque_colors(sky) >= 6, "entry backdrop must not be a single flat color")
+			_check(failures, _image_has_neon(sky), "entry backdrop must include neon sci-fi color")
+	_check(failures, entry.get_node_or_null("Scanlines") is TextureRect, "entry needs CRT scanlines")
+	_check(failures, entry.get_node_or_null("Frame") != null, "entry needs a neon frame")
+	_check(failures, entry.get_node_or_null("RailLeft") != null and entry.get_node_or_null("RailRight") != null, "entry needs side rails")
+	_check(failures, entry.get_node_or_null("TitlePlate") is TextureRect, "title needs a pixel plate")
+	_check(failures, _find_label_text(boot, "像素科幻 · 三关突击"), "entry must show a sci-fi tag under the title")
+	_check(failures, _find_label_text(boot, "点选武器进入平地练手"), "entry must hint how to start")
+	for pair in [["0", "直射"], ["1", "近距散射"], ["2", "能量直线"]]:
+		var card := entry.get_node_or_null("WeaponRow/WeaponCard_%s" % pair[0]) if entry != null else null
+		_check(failures, card != null, "weapon card %s missing" % pair[0])
+		if card == null:
+			continue
+		var icon := card.get_node_or_null("Icon") as TextureRect
+		_check(failures, icon != null and icon.texture != null, "weapon card %s needs a pixel gun icon" % pair[0])
+		if icon != null and icon.texture != null:
+			_check(
+				failures,
+				icon.texture_filter == CanvasItem.TEXTURE_FILTER_NEAREST,
+				"weapon icon %s must be nearest-neighbor pixels" % pair[0]
+			)
+			var gun := icon.texture.get_image()
+			_check(failures, gun != null and _image_has_neon(gun), "weapon icon %s must be neon sci-fi" % pair[0])
+		var button := card.get_node_or_null("Weapon_%s" % pair[0]) as Button
+		_check(failures, button != null and button.icon != null, "weapon button %s needs an icon, not plain text" % pair[0])
+		var flavor := card.get_node_or_null("Flavor") as Label
+		_check(failures, flavor != null and flavor.text == pair[1], "weapon card %s flavor must be %s" % [pair[0], pair[1]])
+	boot.free()
+
+	var bar: Control = HpBarScript.new()
+	_check(failures, bar.get_node_or_null("Caption") != null, "hp bar needs an HP caption")
+	_check(failures, bar.get_node_or_null("Readout") != null, "hp bar needs a numeric readout")
+	_check(failures, bar.get_node_or_null("Frame") is TextureRect, "hp bar needs a pixel frame")
+	_check(failures, bar.get_node_or_null("Ticks") != null, "hp bar needs segment ticks")
+	_check(failures, bar.get_node_or_null("Pips") != null, "hp bar needs energy pips")
+	_check(failures, bar.get_node_or_null("Glow") != null, "hp bar needs a neon glow")
+	_check(failures, bar.get_child_count() >= 10, "hp bar chrome must be more than a plain rectangle")
+	bar.call("set_hp", 2, 5)
+	var readout := bar.get_node_or_null("Readout") as Label
+	_check(failures, readout != null and readout.text == "2/5", "hp readout must track 2/5, got %s" % (readout.text if readout != null else ""))
+	var pips := bar.get_node_or_null("Pips")
+	_check(failures, pips != null and pips.get_child_count() == 5, "hp pips must match max hp")
+	if pips != null and pips.get_child_count() >= 5:
+		_check(failures, (pips.get_child(0) as ColorRect).color.v >= 0.7, "filled hp pip must stay neon")
+		_check(failures, (pips.get_child(3) as ColorRect).color.v < 0.5, "empty hp pip must dim")
+	var frame := bar.get_node_or_null("Frame") as TextureRect
+	if frame != null and frame.texture != null:
+		_check(failures, frame.texture_filter == CanvasItem.TEXTURE_FILTER_NEAREST, "hp frame must be nearest-neighbor pixels")
+		var chrome := frame.texture.get_image()
+		_check(failures, chrome != null and _image_has_neon(chrome), "hp frame must include neon sci-fi color")
+	bar.free()
+
+
 func _weapon_opens_visible_flat_training(failures: PackedStringArray) -> void:
 	if not ResourceLoader.exists("res://stages/stages.gd"):
 		failures.append("stages catalog missing; cannot hang 平地练手")
@@ -314,6 +385,26 @@ func _find_stage_part(node: Node, part: String) -> Node:
 		if found != null:
 			return found
 	return null
+
+
+func _image_has_neon(image: Image) -> bool:
+	for y in image.get_height():
+		for x in image.get_width():
+			var color := image.get_pixel(x, y)
+			if color.a >= 0.5 and color.s >= 0.45 and color.v >= 0.7:
+				return true
+	return false
+
+
+func _unique_opaque_colors(image: Image) -> int:
+	var seen := {}
+	for y in image.get_height():
+		for x in image.get_width():
+			var color := image.get_pixel(x, y)
+			if color.a < 0.5:
+				continue
+			seen[color] = true
+	return seen.size()
 
 
 func _has_visible_sprite(node: Node) -> bool:

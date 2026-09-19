@@ -250,6 +250,8 @@ static func build_stage(stage_index: int) -> Node2D:
 		var boss := _make_hostile("boss", boss_pos, boss_pos.x, boss_pos.x)
 		boss.name = "Boss"
 		root.add_child(boss)
+	root.set_meta("hostile_count", _count_hostiles(root))
+	_add_clear_watcher(root)
 	return root
 
 
@@ -261,6 +263,43 @@ static func install(boot: Object) -> void:
 		boot.call("register_stage", index, Callable(Stages, "build_stage").bind(index))
 
 
+## 打完当前关后的下一关。第三关之后没有下一关，返回 0。
+static func next_stage(stage_index: int) -> int:
+	if stage_index < 1 or stage_index >= STAGE_COUNT:
+		return 0
+	return stage_index + 1
+
+
+## 本关是否已清空：布置过敌人，且活着的杂兵/头目为 0。
+static func is_cleared(stage: Node) -> bool:
+	if stage == null or not is_instance_valid(stage):
+		return false
+	var expected := int(stage.get_meta("hostile_count", 0))
+	if expected <= 0:
+		expected = _count_hostiles(stage)
+	if expected <= 0:
+		return false
+	return _living_hostile_count(stage) == 0
+
+
+## 打完则切到下一关。未清空、已是第三关、或没有 boot.go_to_stage 则不切。返回切到的关号，未切为 0。
+static func advance_if_cleared(boot: Object, stage: Node) -> int:
+	if stage == null or not is_instance_valid(stage):
+		return 0
+	if not is_cleared(stage):
+		return 0
+	var nxt := next_stage(int(stage.get_meta("stage_index", 0)))
+	if nxt < 1:
+		return 0
+	var target := boot
+	if target == null or not is_instance_valid(target) or not target.has_method("go_to_stage"):
+		target = _boot_of(stage)
+	if target == null or not is_instance_valid(target) or not target.has_method("go_to_stage"):
+		return 0
+	target.call("go_to_stage", nxt)
+	return nxt
+
+
 static func _find_boot() -> Object:
 	var loop := Engine.get_main_loop()
 	if loop is SceneTree:
@@ -268,6 +307,60 @@ static func _find_boot() -> Object:
 		if root != null:
 			return root.get_node_or_null("Boot")
 	return null
+
+
+static func _boot_of(stage: Node) -> Object:
+	var node := stage
+	while node != null:
+		if node.has_method("go_to_stage"):
+			return node
+		node = node.get_parent()
+	return null
+
+
+static func _add_clear_watcher(parent: Node2D) -> void:
+	var watcher_script: Script = load("res://stages/clear_watcher.gd")
+	if watcher_script == null or not watcher_script.can_instantiate():
+		return
+	var watcher: Node = watcher_script.new()
+	watcher.name = "ClearWatcher"
+	parent.add_child(watcher)
+
+
+static func _is_hostile_part(node: Node) -> bool:
+	var part := str(node.get_meta("stage_part", ""))
+	return part == "grunt" or part == "boss"
+
+
+static func _is_living(unit: Node) -> bool:
+	if unit == null or not is_instance_valid(unit):
+		return false
+	if "alive" in unit:
+		return bool(unit.alive)
+	return bool(unit.get_meta("alive", true))
+
+
+static func _collect_hostiles(node: Node, into: Array[Node]) -> void:
+	if _is_hostile_part(node):
+		into.append(node)
+	for child in node.get_children():
+		_collect_hostiles(child, into)
+
+
+static func _count_hostiles(node: Node) -> int:
+	var hostiles: Array[Node] = []
+	_collect_hostiles(node, hostiles)
+	return hostiles.size()
+
+
+static func _living_hostile_count(node: Node) -> int:
+	var hostiles: Array[Node] = []
+	_collect_hostiles(node, hostiles)
+	var living := 0
+	for unit in hostiles:
+		if _is_living(unit):
+			living += 1
+	return living
 
 
 static func _layout(stage_index: int) -> Dictionary:

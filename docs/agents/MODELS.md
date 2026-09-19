@@ -1,16 +1,21 @@
 confirmed: no
-updated: 2026-09-19T01:36:00+08:00
+updated: 2026-09-19T19:10:00+08:00
 
-角色 | 任务类型 | 链路 | 目标
-主管 | 推进票：当前会话当主管 | stay | cursor-grok-4.6-xhigh
-human | 推进票：当前会话当主管 | stay | cursor-grok-4.6-xhigh
-delivery implement | 长程实现、自己写文件 | dispatch | cursor-grok-4.6-xhigh
-delivery review | 中等复杂度实现 | dispatch | cursor-grok-4.6-high
-delivery verify | 需要跑命令的通用子任务 | dispatch | deepseek-flash-high
-acceptance review | 中等复杂度实现 | dispatch | cursor-grok-4.6-high
-acceptance verify | 需要跑命令的通用子任务 | dispatch | deepseek-flash-high
-arbitration implement | 架构 / 难题 / 深度调试 | dispatch | gpt-5.6-sol-medium
-arbitration review | 中等复杂度实现 | dispatch | cursor-grok-4.6-high
-arbitration verify | 需要跑命令的通用子任务 | dispatch | deepseek-flash-high
-抽手册 | 从 PDF / 数据手册抽头、隔离正文 | dispatch | deepseek-flash-high
-planning review | 只读检索 / 定位文件符号 | dispatch | cursor-grok-4.6-high
+role | task type | link | target
+planning | Planning manage 决策 (staff only; no patch in this window) | stay | cursor-grok-4.6-xhigh
+delivery | Planning department 分发 another department | dispatch | cursor-grok-4.6-xhigh
+acceptance | Planning department 分发 another department | dispatch | cursor-grok-4.6-xhigh
+arbitration | Planning department 分发 another department | dispatch | gpt-5.6-sol-medium
+human | Planning department 分发 another department | dispatch | cursor-grok-4.6-xhigh
+planning implement | Planning implement (patch; no product code) | delegate | general-purpose
+planning review | Read-only search / locate files and symbols | delegate | code-explorer
+delivery implement | Long-running implementation that writes files | delegate | general-purpose
+delivery review | Medium-complexity implementation | delegate | general-purpose
+delivery verify | General subtask that must run commands | delegate | general-purpose
+acceptance implement | Acceptance implement (merge heads / worktrees) | delegate | general-purpose
+acceptance review | Medium-complexity implementation | delegate | general-purpose
+acceptance verify | General subtask that must run commands | delegate | general-purpose
+arbitration implement | Architecture / hard problem / deep debug | delegate | general-purpose
+arbitration review | Medium-complexity implementation | delegate | general-purpose
+arbitration verify | General subtask that must run commands | delegate | general-purpose
+datasheet extract | Extract registers from a PDF / datasheet; keep the body out of this session | delegate | general-purpose

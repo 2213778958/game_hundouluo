@@ -17,6 +17,8 @@ func run() -> PackedStringArray:
 	_install_registers_builders(failures)
 	_nodes_stay_off_tree_and_2d(failures)
 	_actor_and_camera_stay_inside_bounds(failures)
+	_finishing_a_stage_switches_to_the_next(failures)
+	_three_stages_advance_to_the_third(failures)
 	return failures
 
 
@@ -492,6 +494,127 @@ func _actor_and_camera_stay_inside_bounds(failures: PackedStringArray) -> void:
 	host.free()
 
 
+func _finishing_a_stage_switches_to_the_next(failures: PackedStringArray) -> void:
+	_check(failures, StagesScript.next_stage(1) == 2, "打完平地练手 must go to 高台掩体")
+	_check(failures, StagesScript.next_stage(2) == 3, "打完高台掩体 must go to 通道头目")
+	_check(failures, StagesScript.next_stage(3) == 0, "第三关之后没有下一关")
+	_check(failures, StagesScript.next_stage(0) == 0, "stage 0 has no next stage")
+	_check(failures, StagesScript.next_stage(4) == 0, "there is no fourth stage to advance to")
+	_check(failures, not StagesScript.is_cleared(null), "null stage is not cleared")
+	var loose: Node2D = StagesScript.build_stage(1)
+	_check(failures, loose != null, "clear check needs 平地练手")
+	if loose != null:
+		_check(failures, not StagesScript.is_cleared(loose), "fresh 平地练手 is not cleared")
+		var grunts := _find_parts(loose, "grunt")
+		_check(failures, grunts.size() >= 2, "partial-clear test needs at least two 杂兵")
+		if grunts.size() >= 1:
+			_defeat_unit(grunts[0])
+			_check(failures, not StagesScript.is_cleared(loose), "one leftover 杂兵 must not clear 平地练手")
+			var idle := AdvanceStub.new()
+			_check(
+				failures,
+				StagesScript.advance_if_cleared(idle, loose) == 0,
+				"partial clear must not call go_to_stage"
+			)
+			_check(failures, idle.stage == 0, "partial clear must not switch stages")
+		for i in range(1, grunts.size()):
+			if i < grunts.size() and is_instance_valid(grunts[i]):
+				_defeat_unit(grunts[i])
+		_check(failures, StagesScript.is_cleared(loose), "all 杂兵 down must clear 平地练手")
+		var stub := AdvanceStub.new()
+		var moved := StagesScript.advance_if_cleared(stub, loose)
+		_check(failures, moved == 2, "cleared 平地练手 advances to 2, got %s" % moved)
+		_check(failures, stub.stage == 2, "advance_if_cleared must call go_to_stage(2)")
+		loose.free()
+	if not ResourceLoader.exists("res://boot/boot.gd"):
+		return
+	var script: Script = load("res://boot/boot.gd")
+	if script == null or not script.can_instantiate():
+		return
+	var boot: Object = script.new()
+	StagesScript.install(boot)
+	boot.call("go_to_stage", 1)
+	_check(failures, boot.get("current_stage") == 1, "start on 平地练手")
+	_clear_hosted_stage(boot)
+	_check(
+		failures,
+		boot.get("current_stage") == 2,
+		"打完一关 must switch to 高台掩体, got %s" % boot.get("current_stage")
+	)
+	var after: Node = boot.get_node_or_null("StageHost")
+	if after != null and after.get_child_count() > 0:
+		_check(failures, after.get_child(0).name == "高台掩体", "next stage node must be 高台掩体")
+	boot.free()
+
+
+func _three_stages_advance_to_the_third(failures: PackedStringArray) -> void:
+	if not ResourceLoader.exists("res://boot/boot.gd"):
+		failures.append("boot missing; cannot prove three-stage advance")
+		return
+	var script: Script = load("res://boot/boot.gd")
+	if script == null or not script.can_instantiate():
+		failures.append("boot cannot instantiate for three-stage advance")
+		return
+	var boot: Object = script.new()
+	StagesScript.install(boot)
+	boot.call("go_to_stage", 1)
+	for expected_from in [1, 2]:
+		_check(
+			failures,
+			boot.get("current_stage") == expected_from,
+			"must be on stage %s before clear, got %s" % [expected_from, boot.get("current_stage")]
+		)
+		_clear_hosted_stage(boot)
+		_check(
+			failures,
+			boot.get("current_stage") == expected_from + 1,
+			"clearing stage %s must reach stage %s, got %s"
+			% [expected_from, expected_from + 1, boot.get("current_stage")]
+		)
+	_check(failures, boot.get("current_stage") == 3, "three stages must advance to the third")
+	var host3: Node = boot.get_node_or_null("StageHost")
+	if host3 != null and host3.get_child_count() > 0:
+		_check(failures, host3.get_child(0).name == "短通道头目", "third stage node is 短通道头目")
+		_clear_hosted_stage(boot)
+		_check(
+			failures,
+			boot.get("current_stage") == 3,
+			"通关 stays on 通道头目, got %s" % boot.get("current_stage")
+		)
+	boot.free()
+
+
+func _clear_hosted_stage(boot: Object) -> void:
+	var host: Node = boot.get_node_or_null("StageHost")
+	if host == null or host.get_child_count() == 0:
+		return
+	var stage: Node = host.get_child(0)
+	var index := int(stage.get_meta("stage_index", 0))
+	_defeat_all_hostiles(stage)
+	if not is_instance_valid(stage):
+		return
+	if boot.get("current_stage") == index:
+		StagesScript.advance_if_cleared(boot, stage)
+
+
+func _defeat_all_hostiles(stage: Node) -> void:
+	var units: Array[Node] = []
+	units.append_array(_find_parts(stage, "grunt"))
+	units.append_array(_find_parts(stage, "boss"))
+	for unit in units:
+		if not is_instance_valid(unit):
+			continue
+		_defeat_unit(unit)
+
+
+func _defeat_unit(unit: Node) -> void:
+	if unit.has_method("take_damage"):
+		var hp: Variant = unit.get("hp")
+		unit.call("take_damage", int(hp) if typeof(hp) == TYPE_INT else 999)
+		return
+	unit.set_meta("alive", false)
+
+
 func _walk_no_3d(node: Node, failures: PackedStringArray) -> void:
 	_check(
 		failures,
@@ -640,6 +763,14 @@ class BootStub:
 
 	func register_stage(stage_index: int, builder: Callable) -> void:
 		builders[stage_index] = builder
+
+
+class AdvanceStub:
+	extends RefCounted
+	var stage: int = 0
+
+	func go_to_stage(stage_index: int) -> void:
+		stage = stage_index
 
 
 class ClearProbe:
